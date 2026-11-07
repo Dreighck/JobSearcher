@@ -260,16 +260,6 @@ h1 em { font: italic 400 1.05em var(--serif); color: #66836d; letter-spacing: -1
   .modal-footer { align-items: flex-start; gap: 8px; flex-direction: column; }
   .modal-footer > div { align-self: flex-end; }
 }
-.feed-status-list { display: flex; flex-wrap: wrap; gap: 7px; margin: -5px 0 24px; }
-.feed-status { border-radius: 14px; padding: 6px 9px; font-size: 9px; }
-.feed-status.loaded { background: #edf4ed; color: #5e8064; }
-.feed-status.failed { background: #faf0ee; color: #98675d; }
-.directory-status-dropdown { margin: 0 0 18px; border: 1px solid #e7ebe7; border-radius: 6px; background: #fcfdfc; }
-.directory-status-dropdown > summary, .directory-status-groups > details > summary { padding: 10px 12px; color: #52675a; cursor: pointer; font-size: 10px; font-weight: 700; }
-.directory-status-dropdown > summary span { float: right; color: #64866a; font-size: 9px; font-weight: 600; }
-.directory-status-groups { display: grid; gap: 4px; padding: 0 10px 10px; }
-.directory-status-groups > details { border-top: 1px solid #e9eee9; }
-.directory-status-groups .feed-status-list { margin: 0; padding: 0 5px 8px; }
 .directory-panel { margin: 20px 0 25px; padding: 17px; border: 1px solid #e6ebe6; border-radius: 9px; background: #fff; }
 .directory-tabs { display: flex; gap: 6px; border-bottom: 1px solid #e8ece8; margin-bottom: 13px; }
 .directory-tab { display: flex; align-items: center; gap: 7px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 9px 10px; background: transparent; color: #78877e; font-size: 10px; font-weight: 600; }
