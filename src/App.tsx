@@ -4,6 +4,7 @@ import { parseJobAlert } from "./alerts";
 import { createDraft } from "./drafting";
 import { exportJobs } from "./export";
 import { parseExtractedJobs } from "./importedJobs";
+import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
   confirmedSalaryAtLeast,
   fetchCompanyFeeds,
@@ -185,7 +186,16 @@ function App() {
     setLoadingFeeds(true);
     setMessage("");
     try {
-      const { listings, statuses } = await fetchCompanyFeeds();
+      const [{ listings: companyListings, statuses: companyStatuses }, { listings: boardListings, statuses: boardStatuses }] =
+        await Promise.all([fetchCompanyFeeds(), fetchPublicJobBoards()]);
+      const seen = new Set<string>();
+      const listings = [...companyListings, ...boardListings].filter((listing) => {
+        const key = listing.url.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const statuses = [...companyStatuses, ...boardStatuses];
       setFeedListings(listings);
       setFeedStatuses(statuses);
       const loaded = statuses.filter((status) => status.status === "loaded").length;
@@ -226,6 +236,10 @@ function App() {
       setMessage("Load the job details before saving this listing.");
       return;
     }
+    if (!safeExternalUrl(listing.url)) {
+      setMessage("This job source returned an invalid application link.");
+      return;
+    }
     if (listing.salary && listing.salary.min < 140000) {
       setMessage("This role’s published salary range starts below your $140,000 floor.");
       return;
@@ -240,6 +254,7 @@ function App() {
       id: makeId(),
       sourceId,
       source: listing.source,
+      sourceUrl: listing.sourceUrl,
       title: listing.title,
       company: listing.company,
       url: listing.url,
@@ -276,6 +291,7 @@ function App() {
         id: makeId(),
         sourceId: `authorized:${job.url}`,
         source: job.source || "Authorized site import",
+        sourceUrl: job.sourcePage,
         title: job.title,
         company: job.company,
         url: job.url,
@@ -504,8 +520,10 @@ function FeedJobCard({ listing, loading, onLoadDetails, onSave }: {
     ? `$${listing.salary.min.toLocaleString()}${listing.salary.max ? `–$${listing.salary.max.toLocaleString()}` : "+"} ${listing.salary.currency}`
     : listing.description ? "Salary not disclosed in the public posting" : "Salary not checked yet";
   const officialUrl = safeExternalUrl(listing.url);
+  const sourceUrl = safeExternalUrl(listing.sourceUrl ?? "");
   return <article className="feed-job-card">
     <div className="feed-job-head"><div className="company-mark">{listing.company.slice(0, 1)}</div><div className="job-primary"><strong>{listing.title}</strong><span>{listing.company} <i>·</i> {listing.location || "Location not specified"}</span></div></div>
+    <div className="feed-source">Source: {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">{listing.source}</a> : listing.source}</div>
     <div className={listing.salary ? "feed-salary" : "feed-salary unknown"}>{salary}</div>
     {listing.description && <p className="feed-description">{listing.description.slice(0, 220)}{listing.description.length > 220 ? "…" : ""}</p>}
     <div className="feed-job-actions">

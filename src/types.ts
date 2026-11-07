@@ -26,6 +26,7 @@ export interface Job {
   id: string;
   sourceId?: string;
   source?: string;
+  sourceUrl?: string;
   title: string;
   company: string;
   url: string;

@@ -14,7 +14,7 @@ The extension may extract job listings only from a public HTTPS site origin the 
 
 - **Application:** One local web frontend; no backend, account, telemetry, cloud sync, or external AI service. It may make direct requests to listed public job feeds when the user chooses to search.
 - **Resume:** Import the existing `Drake-Menard.docx` locally. Let the user review and correct extracted profile information.
-- **Job discovery:** On user action, request listings from public employer feeds that permit unauthenticated access: Greenhouse feeds for Stripe, GitLab, Elastic, Datadog, Cloudflare, and MongoDB; Ashby feed for Render. Provide direct careers links/manual alert import for Atlassian, CrowdStrike, Confluent, Automattic, Red Hat, HubSpot, NVIDIA, and BOK Financial until a documented public feed is verified. The optional authorized-site extension may separately extract from explicitly approved domains.
+- **Job discovery:** On user action, request listings from public employer feeds that permit unauthenticated access: Greenhouse feeds for Stripe, GitLab, Elastic, Datadog, Cloudflare, and MongoDB; Ashby feeds for Render, Linear, Ramp, OpenAI, and Notion; and public job-board APIs/feeds from Remote OK, Remotive, Arbeitnow, Jobicy, and We Work Remotely. Provide direct careers links/manual alert import for Atlassian, CrowdStrike, Confluent, Automattic, Red Hat, HubSpot, NVIDIA, and BOK Financial until a documented public feed is verified. The optional authorized-site extension may separately extract from explicitly approved domains.
 - **Job input:** Paste job-alert email/text one listing at a time. Store manually entered URLs as references; do not fetch or scrape them.
 - **Matching:** Prioritize software engineering, backend, full-stack, platform, and infrastructure roles; prefer US remote or Lafayette, Louisiana. Require a published USD salary minimum of at least $140,000 for qualified matches. Keep salary-unverified roles separate until a selected posting's public detail feed is checked; exclude disclosed ranges with minimum under $140,000 from qualified matches. Show the factors behind each match.
 - **Drafting:** Create editable cover-letter drafts locally from the resume profile and pasted job description, using templates/rules rather than external AI calls.
@@ -42,7 +42,7 @@ The extension may extract job listings only from a public HTTPS site origin the 
 - **Frontend:** TypeScript and React, running as a local browser application.
 - **Persistence:** IndexedDB for the resume-derived profile, manually entered job records, drafts, and tracking status.
 - **Processing:** Client-side resume parsing, matching, and draft generation. No server requests are made for personal or job data.
-- **Job feeds:** Direct browser requests to the public Greenhouse and Ashby posting APIs listed above; no application credentials. Filter responses locally, and request a Greenhouse job description only when the user asks to load a selected listing's details.
+- **Job feeds:** Direct browser requests to the public Greenhouse, Ashby, JSON, and RSS job feeds listed above; no application credentials for integrated sources. Filter responses locally, and request a Greenhouse job description only when the user asks to load a selected listing's details.
 - **Extension:** Manifest V3 extension with `storage` and optional exact-origin HTTPS permissions requested on user action; no persistent broad host permission. Site extraction is separate from application autofill.
 - **UI:** Responsive dashboard for resume/profile, job entry, match details, editable draft, and application tracking. Make manual review and submission clear in the job detail flow.
 - **Data model:** Job title, company (if provided), URL, pasted description, match factors, draft, status, timestamps, notes, and follow-up date.
@@ -50,7 +50,7 @@ The extension may extract job listings only from a public HTTPS site origin the 
 ## MVP acceptance criteria
 
 - Import and locally parse the supplied DOCX resume, with editable extracted profile details.
-- Search supported employer feeds; extract from explicitly approved public company sites; import selected extraction JSON or one job-alert listing at a time; add, edit, and remove job records.
+- Search supported employer and remote-job-board feeds; extract from explicitly approved public company sites; import selected extraction JSON or one job-alert listing at a time; add, edit, and remove job records.
 - Show an explainable match summary based on role, skills, location/remote preference, and a hard $140,000 published minimum salary requirement.
 - Create and edit a cover-letter draft from the local profile and pasted job description.
 - Track user-selected application statuses, notes, and follow-up dates.

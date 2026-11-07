@@ -14,8 +14,9 @@ export interface JobListing {
   description: string;
   salary: SalaryRange | null;
   publishedAt: string;
-  provider: "greenhouse" | "ashby";
+  provider: "greenhouse" | "ashby" | "remoteok" | "remotive" | "arbeitnow" | "jobicy" | "weworkremotely";
   board: string;
+  sourceUrl?: string;
 }
 
 export interface FeedStatus {
@@ -37,6 +38,26 @@ export const supportedCompanyFeeds = [
   { company: "Ramp", url: "https://ramp.com/careers", provider: "ashby", board: "ramp" },
   { company: "OpenAI", url: "https://openai.com/careers/search/", provider: "ashby", board: "openai" },
   { company: "Notion", url: "https://www.notion.com/careers", provider: "ashby", board: "notion" },
+  { company: "Anthropic", url: "https://www.anthropic.com/careers", provider: "ashby", board: "anthropic" },
+  { company: "ElevenLabs", url: "https://elevenlabs.io/careers", provider: "ashby", board: "elevenlabs" },
+  { company: "PostHog", url: "https://posthog.com/careers", provider: "ashby", board: "posthog" },
+  { company: "Cursor", url: "https://cursor.com/careers", provider: "ashby", board: "cursor" },
+  { company: "Replit", url: "https://replit.com/careers", provider: "ashby", board: "replit" },
+  { company: "Perplexity", url: "https://www.perplexity.ai/careers", provider: "ashby", board: "perplexity" },
+  { company: "Mistral AI", url: "https://mistral.ai/careers", provider: "ashby", board: "mistral" },
+  { company: "Modal", url: "https://modal.com/careers", provider: "ashby", board: "modal" },
+  { company: "Coinbase", url: "https://www.coinbase.com/careers", provider: "greenhouse", board: "coinbase" },
+  { company: "Figma", url: "https://www.figma.com/careers/", provider: "greenhouse", board: "figma" },
+  { company: "Discord", url: "https://discord.com/jobs", provider: "greenhouse", board: "discord" },
+  { company: "Duolingo", url: "https://careers.duolingo.com/", provider: "greenhouse", board: "duolingo" },
+  { company: "Reddit", url: "https://www.redditinc.com/careers", provider: "greenhouse", board: "reddit" },
+  { company: "Canva", url: "https://www.canva.com/careers/", provider: "greenhouse", board: "canva" },
+  { company: "Spotify", url: "https://www.lifeatspotify.com/jobs", provider: "lever", board: "spotify" },
+  { company: "Palantir", url: "https://www.palantir.com/careers/", provider: "lever", board: "palantir" },
+  { company: "Lyft", url: "https://www.lyft.com/careers", provider: "lever", board: "lyft" },
+  { company: "Asana", url: "https://asana.com/jobs", provider: "lever", board: "asana" },
+  { company: "Twitch", url: "https://www.twitch.tv/jobs/en/", provider: "lever", board: "twitch" },
+  { company: "Plaid", url: "https://plaid.com/careers/", provider: "lever", board: "plaid" },
 ] as const;
 
 export const manualOnlyCompanies = [
@@ -48,6 +69,16 @@ export const manualOnlyCompanies = [
   { company: "HubSpot", url: "https://www.hubspot.com/careers" },
   { company: "NVIDIA", url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite" },
   { company: "BOK Financial", url: "https://jobs.bokf.com/" },
+  { company: "Adobe", url: "https://careers.adobe.com/" },
+  { company: "Salesforce", url: "https://careers.salesforce.com/" },
+  { company: "Dell Technologies", url: "https://jobs.dell.com/" },
+  { company: "Mastercard", url: "https://careers.mastercard.com/" },
+  { company: "Target", url: "https://corporate.target.com/careers" },
+  { company: "T-Mobile", url: "https://www.t-mobile.com/careers" },
+  { company: "Visa", url: "https://corporate.visa.com/en/careers.html" },
+  { company: "Intuit", url: "https://careers.intuit.com/" },
+  { company: "Netflix", url: "https://jobs.netflix.com/" },
+  { company: "Pinterest", url: "https://www.pinterestcareers.com/" },
 ] as const;
 
 interface GreenhouseMetadata {
@@ -292,7 +323,7 @@ export function salaryUndisclosed(job: JobListing): boolean {
 
 export async function loadListingDetails(listing: JobListing): Promise<JobListing> {
   if (listing.description) return listing;
-  if (listing.provider === "ashby") throw new Error("This posting did not include a job description in its public feed.");
+  if (listing.provider !== "greenhouse") throw new Error("This posting did not include a job description in its public feed.");
 
   const endpoint = `https://boards-api.greenhouse.io/v1/boards/${listing.board}/jobs/${encodeURIComponent(listing.id)}?pay_transparency=true`;
   const response = await fetch(endpoint, { headers: { Accept: "application/json" } });

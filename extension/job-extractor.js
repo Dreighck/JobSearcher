@@ -1,5 +1,5 @@
 const jobLinkPattern = /job|career|opening|position|requisition|role/i;
-const blockedHosts = new Set([]);
+const blockedHosts = new Set(["linkedin.com", "indeed.com"]);
 const maxPages = 30;
 const maxDepth = 2;
 const crawlDelayMs = 700;
@@ -19,7 +19,7 @@ export function normalizeSiteUrl(value) {
     throw new Error("Use a public HTTPS URL without embedded credentials.");
   }
   if ([...blockedHosts].some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
-    throw new Error("not supported. Use an authorized public site.");
+    throw new Error("LinkedIn and Indeed are not supported. Use an authorized public site.");
   }
   url.hash = "";
   return { origin: url.origin, url: url.href };

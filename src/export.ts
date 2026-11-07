@@ -1,7 +1,7 @@
 import type { Job } from "./types";
 
 const columns: (keyof Job)[] = [
-  "title", "company", "url", "source", "location", "salaryMin", "salaryMax", "salaryCurrency", "status", "notes", "followUp", "createdAt", "updatedAt",
+  "title", "company", "url", "source", "sourceUrl", "location", "salaryMin", "salaryMax", "salaryCurrency", "status", "notes", "followUp", "createdAt", "updatedAt",
 ];
 
 function quote(value: unknown): string {
