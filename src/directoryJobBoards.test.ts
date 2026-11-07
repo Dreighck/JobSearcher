@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchSelectedDirectoryBoards,
   loadJobBoardDirectory,
-  selectDirectoryBoards,
+  loadWorkdayJobBoardDirectory,
   searchDirectory,
   topDirectoryBoards,
   type DirectoryBoard,
@@ -66,9 +66,7 @@ describe("job board directory", () => {
       { ...board("lever", "medium"), open_roles: 100 },
     ];
     expect(topDirectoryBoards(entries, 2).map((entry) => entry.company)).toEqual(["large", "medium"]);
-    expect(selectDirectoryBoards(entries, 2).map((entry) => entry.company)).toEqual(["large", "medium"]);
     expect(topDirectoryBoards(entries, 0)).toEqual([]);
-    expect(selectDirectoryBoards(entries, 0)).toEqual([]);
   });
 
   it("only loads directory entries with HTTPS URLs on the declared provider hosts", async () => {
@@ -76,6 +74,16 @@ describe("job board directory", () => {
     const invalid = { ...valid, api_url: "https://attacker.example/jobs" };
     vi.stubGlobal("fetch", vi.fn(async () => Response.json([valid, invalid])));
     await expect(loadJobBoardDirectory()).resolves.toEqual([valid]);
+  });
+
+  it("keeps Workday entries out of the searchable directory and loads them separately", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json([board("greenhouse", "searchable"), board("workday", "workday-co")]))
+      .mockResolvedValueOnce(Response.json([board("greenhouse", "searchable"), board("workday", "workday-co")]));
+    vi.stubGlobal("fetch", fetch);
+    await expect(loadJobBoardDirectory()).resolves.toMatchObject([{ company: "searchable", platform: "greenhouse" }]);
+    await expect(loadWorkdayJobBoardDirectory()).resolves.toMatchObject([{ company: "workday-co", platform: "workday" }]);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("maps selected public board feeds and keeps Workday browse-only", async () => {
@@ -142,9 +150,19 @@ describe("job board directory", () => {
     });
   });
 
-  it("rejects directory searches above the 15-board limit", async () => {
-    await expect(fetchSelectedDirectoryBoards(Array.from({ length: 16 }, (_, index) =>
+  it("rejects directory batches above the 100-board limit", async () => {
+    const fetch = vi.fn(async () => Response.json({ jobs: [] }));
+    vi.stubGlobal("fetch", fetch);
+    const hundredBoards = Array.from({ length: 100 }, (_, index) =>
       board("greenhouse", `company-${index}`, `board-${index}`),
-    ))).rejects.toThrow("no more than 15");
+    );
+    const result = await fetchSelectedDirectoryBoards(hundredBoards);
+    expect(result.listings).toEqual([]);
+    expect(result.statuses).toHaveLength(100);
+    expect(result.statuses.every((status) => status.status === "loaded")).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(100);
+    await expect(fetchSelectedDirectoryBoards(Array.from({ length: 101 }, (_, index) =>
+      board("greenhouse", `company-${index}`, `board-${index}`),
+    ))).rejects.toThrow("no more than 100");
   });
 });

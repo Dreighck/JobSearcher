@@ -8,7 +8,7 @@ import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
   fetchSelectedDirectoryBoards,
   loadJobBoardDirectory,
-  selectDirectoryBoards,
+  loadWorkdayJobBoardDirectory,
   searchDirectory,
   topDirectoryBoards,
   type DirectoryBoard,
@@ -101,12 +101,21 @@ function App() {
   const [loadingListingId, setLoadingListingId] = useState<string | null>(null);
   const [searchFilters, setSearchFilters] = useState<JobSearchFilters>(defaultSearchFilters);
   const [directoryBoards, setDirectoryBoards] = useState<DirectoryBoard[]>([]);
+  const [workdayBoards, setWorkdayBoards] = useState<DirectoryBoard[]>([]);
   const [directoryError, setDirectoryError] = useState("");
+  const [workdayDirectoryError, setWorkdayDirectoryError] = useState("");
+  const [workdayDirectoryLoaded, setWorkdayDirectoryLoaded] = useState(false);
   const [directoryQuery, setDirectoryQuery] = useState("");
+  const [workdayQuery, setWorkdayQuery] = useState("");
+  const [directoryTab, setDirectoryTab] = useState<"searchable" | "workday">("searchable");
   const [directoryPlatform, setDirectoryPlatform] = useState<DirectoryPlatform | "all">("all");
   const [selectedDirectoryKeys, setSelectedDirectoryKeys] = useState<string[]>([]);
   const [directoryVisibleCount, setDirectoryVisibleCount] = useState(40);
+  const [processedDirectoryKeys, setProcessedDirectoryKeys] = useState<string[]>([]);
+  const [directoryStatuses, setDirectoryStatuses] = useState<FeedStatus[]>([]);
+  const [batchCooldown, setBatchCooldown] = useState(0);
   const directoryLoadStarted = useRef(false);
+  const workdayDirectoryLoadStarted = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const extractedJobsInput = useRef<HTMLInputElement>(null);
 
@@ -138,6 +147,25 @@ function App() {
       ));
   }, [view]);
 
+  useEffect(() => {
+    if (view !== "discover" || directoryTab !== "workday" || workdayDirectoryLoadStarted.current) return;
+    workdayDirectoryLoadStarted.current = true;
+    loadWorkdayJobBoardDirectory()
+      .then((boards) => {
+        setWorkdayBoards(boards);
+        setWorkdayDirectoryLoaded(true);
+      })
+      .catch((error: unknown) => setWorkdayDirectoryError(
+        error instanceof Error ? error.message : "The Workday directory could not be loaded.",
+      ));
+  }, [directoryTab, view]);
+
+  useEffect(() => {
+    if (batchCooldown <= 0) return;
+    const timer = window.setTimeout(() => setBatchCooldown((remaining) => Math.max(0, remaining - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [batchCooldown]);
+
   const sortedJobs = useMemo(
     () => [...data.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [data.jobs],
@@ -156,6 +184,16 @@ function App() {
     [directoryBoards, directoryPlatform, directoryQuery],
   );
   const visibleDirectoryMatches = directoryMatches.slice(0, directoryVisibleCount);
+  const workdayMatches = useMemo(
+    () => searchDirectory(workdayBoards, workdayQuery, "workday"),
+    [workdayBoards, workdayQuery],
+  );
+  const visibleWorkdayMatches = workdayMatches.slice(0, directoryVisibleCount);
+  const pendingDirectoryBoardCount = directoryBoards.filter((board) =>
+    board.platform !== "workday" &&
+    selectedDirectoryKeys.includes(`${board.platform}:${board.token}`) &&
+    !processedDirectoryKeys.includes(`${board.platform}:${board.token}`),
+  ).length;
 
   function updateSearchFilters(changes: Partial<JobSearchFilters>) {
     setSearchFilters((current) => ({ ...current, ...changes }));
@@ -229,33 +267,30 @@ function App() {
     setLoadingFeeds(true);
     setMessage("");
     try {
-      const selectedDirectoryBoards = directoryBoards.filter((board) =>
-        selectedDirectoryKeys.includes(`${board.platform}:${board.token}`),
-      );
       const [
         { listings: companyListings, statuses: companyStatuses },
         { listings: publicBoardListings, statuses: publicBoardStatuses },
-        { listings: directoryListings, statuses: selectedDirectoryStatuses },
-      ] = await Promise.all([
-        fetchCompanyFeeds(),
-        fetchPublicJobBoards(),
-        fetchSelectedDirectoryBoards(selectedDirectoryBoards),
-      ]);
+      ] = await Promise.all([fetchCompanyFeeds(), fetchPublicJobBoards()]);
       const seen = new Set<string>();
-      const listings = [...companyListings, ...publicBoardListings, ...directoryListings].filter((listing) => {
+      const listings = [...companyListings, ...publicBoardListings].filter((listing) => {
         const key = listing.url.toLowerCase();
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
-      const statuses = [...companyStatuses, ...publicBoardStatuses, ...selectedDirectoryStatuses];
-      setFeedListings(listings);
+      const statuses = [...companyStatuses, ...publicBoardStatuses];
+      setFeedListings((current) => {
+        const directoryProviders = new Set(["greenhouse", "ashby", "lever", "personio", "recruitee", "rippling", "workable", "workday"]);
+        const existingDirectoryListings = current.filter((listing) => directoryProviders.has(listing.provider));
+        const byUrl = new Map([...listings, ...existingDirectoryListings].map((listing) => [listing.url.toLowerCase(), listing]));
+        return [...byUrl.values()];
+      });
       setFeedStatuses(statuses);
       const loaded = statuses.filter((status) => status.status === "loaded").length;
       const failed = statuses.length - loaded;
       setMessage(failed
-        ? `Loaded ${loaded} of ${statuses.length} feeds, including ${selectedDirectoryBoards.length} selected directory boards. See feed status for failures.`
-        : `Loaded current postings from all ${loaded} feeds, including ${selectedDirectoryBoards.length} selected directory boards.`);
+        ? `Loaded ${loaded} of ${statuses.length} integrated feeds. See feed status for failures.`
+        : `Loaded current postings from all ${loaded} integrated feeds. Fetch employer-directory boards separately in batches.`);
     } catch (error) {
       setMessage(error instanceof Error ? `Company feeds could not be loaded: ${error.message}` : "Company feeds could not be loaded.");
     } finally {
@@ -264,34 +299,85 @@ function App() {
   }
 
   function toggleDirectoryBoard(board: DirectoryBoard) {
-    if (board.platform === "workday") return;
     const key = `${board.platform}:${board.token}`;
+    setProcessedDirectoryKeys((current) => current.filter((value) => value !== key));
     setSelectedDirectoryKeys((current) => {
       if (current.includes(key)) return current.filter((value) => value !== key);
-      if (current.length >= 15) {
-        setMessage("Select up to 15 company boards per search to keep requests bounded.");
-        return current;
-      }
       return [...current, key];
     });
   }
 
   function selectAllDirectoryMatches() {
-    const selectable = selectDirectoryBoards(directoryMatches);
-    setSelectedDirectoryKeys(selectable.map((board) => `${board.platform}:${board.token}`));
-    setMessage(directoryMatches.length > selectable.length
-      ? `Selected the top ${selectable.length} fetchable employers from ${directoryMatches.length} matching boards. Search requests remain capped at 15.`
-      : `Selected all ${selectable.length} matching fetchable employers.`);
+    setSelectedDirectoryKeys(directoryMatches.map((board) => `${board.platform}:${board.token}`));
+    setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
+    setMessage(`Selected all ${directoryMatches.length.toLocaleString()} matching directory boards. Fetch results manually in batches of up to 100.`);
+  }
+
+  function clearDirectorySelection() {
+    setSelectedDirectoryKeys([]);
+    setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
+  }
+
+  async function fetchNextDirectoryBatch() {
+    if (batchCooldown > 0) return;
+    const selected = directoryBoards.filter((board) =>
+      selectedDirectoryKeys.includes(`${board.platform}:${board.token}`) &&
+      !processedDirectoryKeys.includes(`${board.platform}:${board.token}`),
+    );
+    if (!selected.length) {
+      setMessage("There are no unsearched selected directory boards.");
+      return;
+    }
+    const skippedBoards = selected.filter((board) => board.platform === "workday");
+    const batch = selected.filter((board) => board.platform !== "workday").slice(0, 100);
+    if (!batch.length) {
+      setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map((board) => `${board.platform}:${board.token}`)]);
+      setMessage("The remaining selected entries use Workday, which cannot be fetched directly from the browser. Open their board links from the directory.");
+      return;
+    }
+    setLoadingFeeds(true);
+    setMessage("");
+    try {
+      const { listings, statuses } = await fetchSelectedDirectoryBoards(batch);
+      setDirectoryStatuses((current) => [...current, ...statuses]);
+      setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map((board) => `${board.platform}:${board.token}`), ...batch.map((board) => `${board.platform}:${board.token}`)]);
+      setFeedListings((current) => {
+        const byUrl = new Map(current.map((listing) => [listing.url.toLowerCase(), listing]));
+        for (const listing of listings) byUrl.set(listing.url.toLowerCase(), listing);
+        return [...byUrl.values()];
+      });
+      setBatchCooldown(10);
+      setMessage(`Fetched a batch of ${batch.length} directory boards (${statuses.filter((status) => status.status === "loaded").length} succeeded). Skipped ${skippedBoards.length} Workday boards. ${Math.max(0, selected.length - batch.length - skippedBoards.length)} fetchable boards remain; start the next batch manually after the pause.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? `Directory batch failed: ${error.message}` : "Directory batch failed unexpectedly.");
+    } finally {
+      setLoadingFeeds(false);
+    }
   }
 
   async function retryDirectoryLoad() {
+    if (directoryTab === "workday") {
+      setWorkdayDirectoryError("");
+      try {
+        const boards = await loadWorkdayJobBoardDirectory();
+        setWorkdayBoards(boards);
+        setWorkdayDirectoryLoaded(true);
+        workdayDirectoryLoadStarted.current = true;
+      } catch (error) {
+        setWorkdayDirectoryError(error instanceof Error ? error.message : "The Workday directory could not be loaded.");
+      }
+      return;
+    }
     setDirectoryError("");
     try {
       const boards = await loadJobBoardDirectory();
       setDirectoryBoards(boards);
       setSelectedDirectoryKeys(topDirectoryBoards(boards).map((board) => `${board.platform}:${board.token}`));
+      directoryLoadStarted.current = true;
     } catch (error) {
-      setDirectoryError(error instanceof Error ? error.message : "The company directory could not be loaded.");
+      setDirectoryError(error instanceof Error ? error.message : "The searchable company directory could not be loaded.");
     }
   }
 
@@ -504,7 +590,7 @@ function App() {
           <section className="page">
             <div className="welcome-row">
               <div><div className="eyebrow">PUBLIC JOB FEEDS</div><h1>Find your <em>next role.</em></h1><p className="page-subtitle">Search public employer and job-board listings, then tune the results to your preferences.</p></div>
-              <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds || (!directoryBoards.length && !directoryError)}>{loadingFeeds ? "Loading feeds…" : "Search all selected feeds"} <span>↻</span></button>
+              <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds}>{loadingFeeds ? "Loading feeds…" : "Refresh integrated feeds"} <span>↻</span></button>
             </div>
             <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads public job-board feeds from supported sources. Your resume and profile are not sent. Search filters are applied locally to the listings; you review and submit applications yourself.</p></div></div>
             <div className="form-card search-filter-card">
@@ -523,12 +609,25 @@ function App() {
             </div>
             <p className="feed-company-names">Integrated feeds: {supportedCompanyFeeds.map((source) => source.company).join(", ")}.</p>
             <div className="directory-panel">
-              <div className="directory-heading">
-                <div><h2>Choose employers from the directory</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} public boards; the top 15 fetchable boards by listed roles are preselected.` : directoryError || "Loading the local employer directory…"}</p></div>
+              <div className="directory-tabs" role="tablist" aria-label="Employer board directories">
+                <button role="tab" aria-selected={directoryTab === "searchable"} className={directoryTab === "searchable" ? "directory-tab active" : "directory-tab"} onClick={() => setDirectoryTab("searchable")}>
+                  Searchable boards <span>{directoryBoards.length.toLocaleString()}</span>
+                </button>
+                <button role="tab" aria-selected={directoryTab === "workday"} className={directoryTab === "workday" ? "directory-tab active" : "directory-tab"} onClick={() => setDirectoryTab("workday")}>
+                  Workday boards <span>{workdayBoards.length.toLocaleString()}</span>
+                </button>
               </div>
-              <details className="directory-dropdown">
-                <summary>Searchable employer list <span>{selectedDirectoryKeys.length} selected</span></summary>
-                <div className="directory-dropdown-panel">
+              {directoryTab === "searchable" ? (
+                <>
+                  <div className="directory-heading directory-tab-heading">
+                    <div><h2>Choose employers to search</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} searchable public boards; the top 15 by listed roles are preselected.` : directoryError || "Loading the searchable employer directory…"}</p></div>
+                    <button className="button button-outline" onClick={fetchNextDirectoryBatch} disabled={loadingFeeds || batchCooldown > 0 || pendingDirectoryBoardCount === 0}>
+                      {loadingFeeds ? "Fetching batch…" : batchCooldown > 0 ? `Next batch in ${batchCooldown}s` : `Fetch next batch (${Math.min(100, pendingDirectoryBoardCount)} max)`}
+                    </button>
+                  </div>
+                  <details className="directory-dropdown">
+                    <summary>Searchable employer list <span>{selectedDirectoryKeys.length.toLocaleString()} selected</span></summary>
+                    <div className="directory-dropdown-panel">
                   <div className="directory-controls">
                     <label>Search company, platform, or region
                       <input type="search" value={directoryQuery} onChange={(event) => { setDirectoryQuery(event.target.value); setDirectoryVisibleCount(40); }} placeholder="e.g. NVIDIA, Stripe, healthcare" />
@@ -539,39 +638,69 @@ function App() {
                         <option value="ashby">Ashby</option><option value="greenhouse">Greenhouse</option>
                         <option value="lever">Lever</option><option value="personio">Personio</option>
                         <option value="recruitee">Recruitee</option><option value="rippling">Rippling</option>
-                        <option value="workable">Workable</option><option value="workday">Workday</option>
+                        <option value="workable">Workable</option>
                       </select>
                     </label>
                   </div>
                   {directoryError && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
                   {!directoryQuery.trim() && directoryBoards.length === 0 ? <p className="directory-help">Loading the employer directory…</p> : directoryMatches.length ? (
                     <>
-                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. Scroll the list or search to find a company. Workday entries link to their careers page but cannot be searched directly from the app.</p>
+                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. “Select all” applies to every match, including entries not currently visible. Fetching is manual and limited to 100 boards per batch with a pause between batches.</p>
                       <div className="directory-selection-actions">
-                        <button className="text-button" onClick={selectAllDirectoryMatches}>Select all matches (up to 15)</button>
-                        <button className="text-button" onClick={() => setSelectedDirectoryKeys([])} disabled={selectedDirectoryKeys.length === 0}>Clear selection</button>
+                        <button className="text-button" onClick={selectAllDirectoryMatches}>Select all {directoryMatches.length.toLocaleString()} matches</button>
+                        <button className="text-button" onClick={clearDirectorySelection} disabled={selectedDirectoryKeys.length === 0}>Clear selection</button>
                       </div>
                       <div className="directory-results">
                         {visibleDirectoryMatches.map((board) => {
                           const key = `${board.platform}:${board.token}`;
-                          const workday = board.platform === "workday";
                           return <div className="directory-result" key={key}>
                             <label className="directory-select">
-                              <input type="checkbox" checked={selectedDirectoryKeys.includes(key)} disabled={workday} onChange={() => toggleDirectoryBoard(board)} />
+                              <input type="checkbox" checked={selectedDirectoryKeys.includes(key)} onChange={() => toggleDirectoryBoard(board)} />
                               <span><strong>{board.company}</strong><small>{board.platform} · {board.open_roles.toLocaleString()} listed roles{board.count_basis === "vendor" ? " · vendor estimate" : ""}{board.region ? ` · ${board.region}` : ""}</small></span>
                             </label>
                             <a href={board.board_url} target="_blank" rel="noreferrer">Open board ↗</a>
-                            {workday && <small className="directory-limit-note">Browser access unavailable</small>}
                           </div>;
                         })}
                       </div>
                       {directoryVisibleCount < directoryMatches.length && <button className="button button-outline directory-more" onClick={() => setDirectoryVisibleCount((count) => count + 40)}>Show 40 more ({(directoryMatches.length - directoryVisibleCount).toLocaleString()} remaining)</button>}
                     </>
                   ) : <p className="directory-help">No board matched that search. Try another company name or platform.</p>}
+                    </div>
+                  </details>
+                  {directoryError && !directoryBoards.length && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
+                  {!directoryBoards.length && !directoryError && <p className="directory-help">Loading the local employer directory…</p>}
+                </>
+              ) : (
+                <div className="workday-directory">
+                  <div className="directory-heading directory-tab-heading">
+                    <div><h2>Workday career sites</h2><p>{workdayBoards.length.toLocaleString()} Workday company boards. Workday doesn’t allow the app to query postings directly; these links open the company’s job postings page.</p></div>
+                  </div>
+                  <label className="workday-search">Search Workday companies
+                    <input type="search" value={workdayQuery} onChange={(event) => { setWorkdayQuery(event.target.value); setDirectoryVisibleCount(40); }} placeholder="Search company name…" />
+                  </label>
+                  {workdayDirectoryError && <p className="directory-error" role="alert">{workdayDirectoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
+                  {!workdayDirectoryLoaded && !workdayDirectoryError && <p className="directory-help">Loading the Workday company directory…</p>}
+                  {workdayMatches.length ? (
+                    <>
+                      <p className="directory-help">{workdayMatches.length.toLocaleString()} matching Workday boards. Select a company link to view its current postings on Workday.</p>
+                      <div className="directory-results">
+                        {visibleWorkdayMatches.map((board) => (
+                          <div className="directory-result workday-directory-result" key={`${board.platform}:${board.token}`}>
+                            <span className="directory-select"><span><strong>{board.company}</strong><small>Workday · {board.open_roles.toLocaleString()} listed roles{board.count_basis === "vendor" ? " · vendor estimate" : ""}{board.region ? ` · ${board.region}` : ""}</small></span></span>
+                            <a href={board.board_url} target="_blank" rel="noreferrer">View job postings ↗</a>
+                          </div>
+                        ))}
+                      </div>
+                      {directoryVisibleCount < workdayMatches.length && <button className="button button-outline directory-more" onClick={() => setDirectoryVisibleCount((count) => count + 40)}>Show 40 more ({(workdayMatches.length - directoryVisibleCount).toLocaleString()} remaining)</button>}
+                    </>
+                  ) : <p className="directory-help">{workdayQuery.trim() ? "No Workday company matched that search." : "Search by company to browse Workday job boards."}</p>}
                 </div>
-              </details>
-              {directoryError && !directoryBoards.length && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
-              {!directoryBoards.length && !directoryError && <p className="directory-help">Loading the local employer directory…</p>}
+              )}
+              {directoryStatuses.length > 0 && <div className="feed-status-list" aria-label="Directory batch status">{directoryStatuses.slice(-100).map((status, index) =>
+                <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={`${status.company}:${index}`}>
+                  {status.company}: {status.status === "loaded" ? `${status.count} listings` : status.error}
+                </span>,
+              )}</div>}
             </div>
             {feedStatuses.length > 0 && <div className="feed-status-list" aria-label="Company feed status">{feedStatuses.map((status) =>
               <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>

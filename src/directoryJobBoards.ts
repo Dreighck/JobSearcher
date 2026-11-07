@@ -1,4 +1,5 @@
 import directoryUrl from "../jobBoardDirectory.json?url";
+import workdayDirectoryUrl from "../workdayJobBoardDirectory.json?url";
 import { salaryFromDescription, type FeedStatus, type JobListing, type SalaryRange } from "./jobFeeds";
 
 export type DirectoryPlatform =
@@ -93,14 +94,18 @@ export async function loadJobBoardDirectory(): Promise<DirectoryBoard[]> {
   if (!response.ok) throw new Error(`Could not load the company directory (HTTP ${response.status}).`);
   const payload: unknown = await response.json();
   if (!Array.isArray(payload)) throw new Error("The company directory has an unexpected format.");
-  return payload.filter(isDirectoryBoard);
+  return payload.filter(isDirectoryBoard).filter((board) => board.platform !== "workday");
+}
+
+export async function loadWorkdayJobBoardDirectory(): Promise<DirectoryBoard[]> {
+  const response = await fetch(workdayDirectoryUrl);
+  if (!response.ok) throw new Error(`Could not load the Workday directory (HTTP ${response.status}).`);
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload)) throw new Error("The Workday directory has an unexpected format.");
+  return payload.filter(isDirectoryBoard).filter((board) => board.platform === "workday");
 }
 
 export function topDirectoryBoards(boards: DirectoryBoard[], limit = 15): DirectoryBoard[] {
-  return selectDirectoryBoards(boards, limit);
-}
-
-export function selectDirectoryBoards(boards: DirectoryBoard[], limit = 15): DirectoryBoard[] {
   const maximum = Math.max(0, Math.floor(limit));
   if (maximum === 0) return [];
   const sorted = boards
@@ -113,6 +118,7 @@ export function selectDirectoryBoards(boards: DirectoryBoard[], limit = 15): Dir
   const companies = new Set<string>();
   const selected: DirectoryBoard[] = [];
   for (const board of sorted) {
+    if (board.platform === "workday") continue;
     const company = board.company.toLowerCase();
     if (companies.has(company)) continue;
     companies.add(company);
@@ -343,7 +349,7 @@ async function fetchBoard(board: DirectoryBoard): Promise<JobListing[]> {
 export async function fetchSelectedDirectoryBoards(
   boards: DirectoryBoard[],
 ): Promise<{ listings: JobListing[]; statuses: FeedStatus[] }> {
-  if (boards.length > 15) throw new Error("Select no more than 15 company boards per search.");
+  if (boards.length > 100) throw new Error("Fetch no more than 100 directory boards in one batch.");
   const results: Array<{ listings: JobListing[]; status: FeedStatus }> = new Array(boards.length);
   let nextIndex = 0;
   const workers = Array.from({ length: Math.min(4, boards.length) }, async () => {
