@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   fetchSelectedDirectoryBoards,
   loadJobBoardDirectory,
+  selectDirectoryBoards,
   searchDirectory,
+  topDirectoryBoards,
   type DirectoryBoard,
   type DirectoryPlatform,
 } from "./directoryJobBoards";
@@ -54,6 +56,19 @@ describe("job board directory", () => {
     expect(searchDirectory(entries, "nvidia", "all").map((entry) => entry.company)).toEqual(["nvidia"]);
     expect(searchDirectory(entries, "ashby", "ashby").map((entry) => entry.company)).toEqual(["stripe"]);
     expect(searchDirectory(entries, "EU", "all").map((entry) => entry.company)).toEqual(["example"]);
+  });
+
+  it("preselects the highest-role fetchable boards with one board per employer", () => {
+    const entries = [
+      { ...board("workday", "blocked"), open_roles: 50000 },
+      { ...board("greenhouse", "large"), open_roles: 250 },
+      { ...board("ashby", "large", "large-secondary"), open_roles: 200 },
+      { ...board("lever", "medium"), open_roles: 100 },
+    ];
+    expect(topDirectoryBoards(entries, 2).map((entry) => entry.company)).toEqual(["large", "medium"]);
+    expect(selectDirectoryBoards(entries, 2).map((entry) => entry.company)).toEqual(["large", "medium"]);
+    expect(topDirectoryBoards(entries, 0)).toEqual([]);
+    expect(selectDirectoryBoards(entries, 0)).toEqual([]);
   });
 
   it("only loads directory entries with HTTPS URLs on the declared provider hosts", async () => {
@@ -125,5 +140,11 @@ describe("job board directory", () => {
       title: "Software Engineer",
       location: "Berlin",
     });
+  });
+
+  it("rejects directory searches above the 15-board limit", async () => {
+    await expect(fetchSelectedDirectoryBoards(Array.from({ length: 16 }, (_, index) =>
+      board("greenhouse", `company-${index}`, `board-${index}`),
+    ))).rejects.toThrow("no more than 15");
   });
 });

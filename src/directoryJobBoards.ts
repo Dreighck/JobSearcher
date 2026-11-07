@@ -96,6 +96,32 @@ export async function loadJobBoardDirectory(): Promise<DirectoryBoard[]> {
   return payload.filter(isDirectoryBoard);
 }
 
+export function topDirectoryBoards(boards: DirectoryBoard[], limit = 15): DirectoryBoard[] {
+  return selectDirectoryBoards(boards, limit);
+}
+
+export function selectDirectoryBoards(boards: DirectoryBoard[], limit = 15): DirectoryBoard[] {
+  const maximum = Math.max(0, Math.floor(limit));
+  if (maximum === 0) return [];
+  const sorted = boards
+    .filter((board) => board.platform !== "workday")
+    .sort((left, right) =>
+      right.open_roles - left.open_roles ||
+      left.company.localeCompare(right.company) ||
+      left.platform.localeCompare(right.platform),
+    );
+  const companies = new Set<string>();
+  const selected: DirectoryBoard[] = [];
+  for (const board of sorted) {
+    const company = board.company.toLowerCase();
+    if (companies.has(company)) continue;
+    companies.add(company);
+    selected.push(board);
+    if (selected.length >= maximum) break;
+  }
+  return selected;
+}
+
 export function searchDirectory(
   boards: DirectoryBoard[],
   query: string,
@@ -105,7 +131,11 @@ export function searchDirectory(
   return boards.filter((board) =>
     (platform === "all" || board.platform === platform) &&
     (!search || `${board.company} ${board.platform} ${board.region}`.toLowerCase().includes(search)),
-  ).slice(0, 40);
+  ).sort((left, right) =>
+    right.open_roles - left.open_roles ||
+    left.company.localeCompare(right.company) ||
+    left.platform.localeCompare(right.platform),
+  );
 }
 
 function makeListing(
@@ -313,6 +343,7 @@ async function fetchBoard(board: DirectoryBoard): Promise<JobListing[]> {
 export async function fetchSelectedDirectoryBoards(
   boards: DirectoryBoard[],
 ): Promise<{ listings: JobListing[]; statuses: FeedStatus[] }> {
+  if (boards.length > 15) throw new Error("Select no more than 15 company boards per search.");
   const results: Array<{ listings: JobListing[]; status: FeedStatus }> = new Array(boards.length);
   let nextIndex = 0;
   const workers = Array.from({ length: Math.min(4, boards.length) }, async () => {

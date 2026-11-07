@@ -8,7 +8,9 @@ import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
   fetchSelectedDirectoryBoards,
   loadJobBoardDirectory,
+  selectDirectoryBoards,
   searchDirectory,
+  topDirectoryBoards,
   type DirectoryBoard,
   type DirectoryPlatform,
 } from "./directoryJobBoards";
@@ -103,7 +105,7 @@ function App() {
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [directoryPlatform, setDirectoryPlatform] = useState<DirectoryPlatform | "all">("all");
   const [selectedDirectoryKeys, setSelectedDirectoryKeys] = useState<string[]>([]);
-  const [directoryStatuses, setDirectoryStatuses] = useState<FeedStatus[]>([]);
+  const [directoryVisibleCount, setDirectoryVisibleCount] = useState(40);
   const directoryLoadStarted = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const extractedJobsInput = useRef<HTMLInputElement>(null);
@@ -127,7 +129,10 @@ function App() {
     if (view !== "discover" || directoryLoadStarted.current) return;
     directoryLoadStarted.current = true;
     loadJobBoardDirectory()
-      .then(setDirectoryBoards)
+      .then((boards) => {
+        setDirectoryBoards(boards);
+        setSelectedDirectoryKeys(topDirectoryBoards(boards).map((board) => `${board.platform}:${board.token}`));
+      })
       .catch((error: unknown) => setDirectoryError(
         error instanceof Error ? error.message : "The company directory could not be loaded.",
       ));
@@ -150,6 +155,7 @@ function App() {
     () => searchDirectory(directoryBoards, directoryQuery, directoryPlatform),
     [directoryBoards, directoryPlatform, directoryQuery],
   );
+  const visibleDirectoryMatches = directoryMatches.slice(0, directoryVisibleCount);
 
   function updateSearchFilters(changes: Partial<JobSearchFilters>) {
     setSearchFilters((current) => ({ ...current, ...changes }));
@@ -223,23 +229,33 @@ function App() {
     setLoadingFeeds(true);
     setMessage("");
     try {
-      const [{ listings: companyListings, statuses: companyStatuses }, { listings: boardListings, statuses: boardStatuses }] =
-        await Promise.all([fetchCompanyFeeds(), fetchPublicJobBoards()]);
+      const selectedDirectoryBoards = directoryBoards.filter((board) =>
+        selectedDirectoryKeys.includes(`${board.platform}:${board.token}`),
+      );
+      const [
+        { listings: companyListings, statuses: companyStatuses },
+        { listings: publicBoardListings, statuses: publicBoardStatuses },
+        { listings: directoryListings, statuses: selectedDirectoryStatuses },
+      ] = await Promise.all([
+        fetchCompanyFeeds(),
+        fetchPublicJobBoards(),
+        fetchSelectedDirectoryBoards(selectedDirectoryBoards),
+      ]);
       const seen = new Set<string>();
-      const listings = [...companyListings, ...boardListings].filter((listing) => {
+      const listings = [...companyListings, ...publicBoardListings, ...directoryListings].filter((listing) => {
         const key = listing.url.toLowerCase();
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
-      const statuses = [...companyStatuses, ...boardStatuses];
+      const statuses = [...companyStatuses, ...publicBoardStatuses, ...selectedDirectoryStatuses];
       setFeedListings(listings);
       setFeedStatuses(statuses);
       const loaded = statuses.filter((status) => status.status === "loaded").length;
       const failed = statuses.length - loaded;
       setMessage(failed
-        ? `Loaded ${loaded} of ${statuses.length} company feeds. See feed status below for failures.`
-        : `Loaded current postings from all ${loaded} supported company feeds.`);
+        ? `Loaded ${loaded} of ${statuses.length} feeds, including ${selectedDirectoryBoards.length} selected directory boards. See feed status for failures.`
+        : `Loaded current postings from all ${loaded} feeds, including ${selectedDirectoryBoards.length} selected directory boards.`);
     } catch (error) {
       setMessage(error instanceof Error ? `Company feeds could not be loaded: ${error.message}` : "Company feeds could not be loaded.");
     } finally {
@@ -252,43 +268,28 @@ function App() {
     const key = `${board.platform}:${board.token}`;
     setSelectedDirectoryKeys((current) => {
       if (current.includes(key)) return current.filter((value) => value !== key);
-      if (current.length >= 10) {
-        setMessage("Select up to 10 company boards per search to keep requests bounded.");
+      if (current.length >= 15) {
+        setMessage("Select up to 15 company boards per search to keep requests bounded.");
         return current;
       }
       return [...current, key];
     });
   }
 
-  async function searchSelectedBoards() {
-    const selected = directoryBoards.filter((board) =>
-      selectedDirectoryKeys.includes(`${board.platform}:${board.token}`),
-    );
-    if (!selected.length) {
-      setMessage("Search the directory and select at least one supported company board.");
-      return;
-    }
-    setLoadingFeeds(true);
-    setMessage("");
-    try {
-      const { listings, statuses } = await fetchSelectedDirectoryBoards(selected);
-      setDirectoryStatuses(statuses);
-      setFeedListings((current) => {
-        const byUrl = new Map(current.map((listing) => [listing.url.toLowerCase(), listing]));
-        for (const listing of listings) byUrl.set(listing.url.toLowerCase(), listing);
-        return [...byUrl.values()];
-      });
-      const loaded = statuses.filter((status) => status.status === "loaded").length;
-      setMessage(`Loaded ${loaded} of ${statuses.length} selected company boards. Search results are filtered locally.`);
-    } finally {
-      setLoadingFeeds(false);
-    }
+  function selectAllDirectoryMatches() {
+    const selectable = selectDirectoryBoards(directoryMatches);
+    setSelectedDirectoryKeys(selectable.map((board) => `${board.platform}:${board.token}`));
+    setMessage(directoryMatches.length > selectable.length
+      ? `Selected the top ${selectable.length} fetchable employers from ${directoryMatches.length} matching boards. Search requests remain capped at 15.`
+      : `Selected all ${selectable.length} matching fetchable employers.`);
   }
 
   async function retryDirectoryLoad() {
     setDirectoryError("");
     try {
-      setDirectoryBoards(await loadJobBoardDirectory());
+      const boards = await loadJobBoardDirectory();
+      setDirectoryBoards(boards);
+      setSelectedDirectoryKeys(topDirectoryBoards(boards).map((board) => `${board.platform}:${board.token}`));
     } catch (error) {
       setDirectoryError(error instanceof Error ? error.message : "The company directory could not be loaded.");
     }
@@ -503,7 +504,7 @@ function App() {
           <section className="page">
             <div className="welcome-row">
               <div><div className="eyebrow">PUBLIC JOB FEEDS</div><h1>Find your <em>next role.</em></h1><p className="page-subtitle">Search public employer and job-board listings, then tune the results to your preferences.</p></div>
-              <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds}>{loadingFeeds ? "Loading feeds…" : "Refresh company feeds"} <span>↻</span></button>
+              <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds || (!directoryBoards.length && !directoryError)}>{loadingFeeds ? "Loading feeds…" : "Search all selected feeds"} <span>↻</span></button>
             </div>
             <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads public job-board feeds from supported sources. Your resume and profile are not sent. Search filters are applied locally to the listings; you review and submit applications yourself.</p></div></div>
             <div className="form-card search-filter-card">
@@ -523,47 +524,54 @@ function App() {
             <p className="feed-company-names">Integrated feeds: {supportedCompanyFeeds.map((source) => source.company).join(", ")}.</p>
             <div className="directory-panel">
               <div className="directory-heading">
-                <div><h2>Search the employer directory</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} public company boards in your local directory.` : directoryError || "Loading the local employer directory…"}</p></div>
-                <button className="button button-outline" onClick={searchSelectedBoards} disabled={loadingFeeds || selectedDirectoryKeys.length === 0}>
-                  {loadingFeeds ? "Searching…" : `Search selected (${selectedDirectoryKeys.length}/10)`}
-                </button>
+                <div><h2>Choose employers from the directory</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} public boards; the top 15 fetchable boards by listed roles are preselected.` : directoryError || "Loading the local employer directory…"}</p></div>
               </div>
-              <div className="directory-controls">
-                <label>Company, board platform, or region
-                  <input type="search" value={directoryQuery} onChange={(event) => setDirectoryQuery(event.target.value)} placeholder="e.g. NVIDIA, Stripe, healthcare" />
-                </label>
-                <label>Platform
-                  <select value={directoryPlatform} onChange={(event) => setDirectoryPlatform(event.target.value as DirectoryPlatform | "all")}>
-                    <option value="all">All platforms</option>
-                    <option value="ashby">Ashby</option><option value="greenhouse">Greenhouse</option>
-                    <option value="lever">Lever</option><option value="personio">Personio</option>
-                    <option value="recruitee">Recruitee</option><option value="rippling">Rippling</option>
-                    <option value="workable">Workable</option><option value="workday">Workday</option>
-                  </select>
-                </label>
-              </div>
-              {directoryError && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
-              {!directoryQuery.trim() ? <p className="directory-help">Enter a company name or choose a platform to find boards. Select up to 10, then search only those employers.</p> : directoryMatches.length ? (
-                <div className="directory-results">
-                  {directoryMatches.map((board) => {
-                    const key = `${board.platform}:${board.token}`;
-                    const workday = board.platform === "workday";
-                    return <div className="directory-result" key={key}>
-                      <label className="directory-select">
-                        <input type="checkbox" checked={selectedDirectoryKeys.includes(key)} disabled={workday} onChange={() => toggleDirectoryBoard(board)} />
-                        <span><strong>{board.company}</strong><small>{board.platform} · {board.open_roles.toLocaleString()} listed roles{board.region ? ` · ${board.region}` : ""}</small></span>
-                      </label>
-                      <a href={board.board_url} target="_blank" rel="noreferrer">Open board ↗</a>
-                      {workday && <small className="directory-limit-note">Direct requests are blocked by Workday’s browser CORS policy</small>}
-                    </div>;
-                  })}
+              <details className="directory-dropdown">
+                <summary>Searchable employer list <span>{selectedDirectoryKeys.length} selected</span></summary>
+                <div className="directory-dropdown-panel">
+                  <div className="directory-controls">
+                    <label>Search company, platform, or region
+                      <input type="search" value={directoryQuery} onChange={(event) => { setDirectoryQuery(event.target.value); setDirectoryVisibleCount(40); }} placeholder="e.g. NVIDIA, Stripe, healthcare" />
+                    </label>
+                    <label>Platform
+                      <select value={directoryPlatform} onChange={(event) => { setDirectoryPlatform(event.target.value as DirectoryPlatform | "all"); setDirectoryVisibleCount(40); }}>
+                        <option value="all">All platforms</option>
+                        <option value="ashby">Ashby</option><option value="greenhouse">Greenhouse</option>
+                        <option value="lever">Lever</option><option value="personio">Personio</option>
+                        <option value="recruitee">Recruitee</option><option value="rippling">Rippling</option>
+                        <option value="workable">Workable</option><option value="workday">Workday</option>
+                      </select>
+                    </label>
+                  </div>
+                  {directoryError && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
+                  {!directoryQuery.trim() && directoryBoards.length === 0 ? <p className="directory-help">Loading the employer directory…</p> : directoryMatches.length ? (
+                    <>
+                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. Scroll the list or search to find a company. Workday entries link to their careers page but cannot be searched directly from the app.</p>
+                      <div className="directory-selection-actions">
+                        <button className="text-button" onClick={selectAllDirectoryMatches}>Select all matches (up to 15)</button>
+                        <button className="text-button" onClick={() => setSelectedDirectoryKeys([])} disabled={selectedDirectoryKeys.length === 0}>Clear selection</button>
+                      </div>
+                      <div className="directory-results">
+                        {visibleDirectoryMatches.map((board) => {
+                          const key = `${board.platform}:${board.token}`;
+                          const workday = board.platform === "workday";
+                          return <div className="directory-result" key={key}>
+                            <label className="directory-select">
+                              <input type="checkbox" checked={selectedDirectoryKeys.includes(key)} disabled={workday} onChange={() => toggleDirectoryBoard(board)} />
+                              <span><strong>{board.company}</strong><small>{board.platform} · {board.open_roles.toLocaleString()} listed roles{board.count_basis === "vendor" ? " · vendor estimate" : ""}{board.region ? ` · ${board.region}` : ""}</small></span>
+                            </label>
+                            <a href={board.board_url} target="_blank" rel="noreferrer">Open board ↗</a>
+                            {workday && <small className="directory-limit-note">Browser access unavailable</small>}
+                          </div>;
+                        })}
+                      </div>
+                      {directoryVisibleCount < directoryMatches.length && <button className="button button-outline directory-more" onClick={() => setDirectoryVisibleCount((count) => count + 40)}>Show 40 more ({(directoryMatches.length - directoryVisibleCount).toLocaleString()} remaining)</button>}
+                    </>
+                  ) : <p className="directory-help">No board matched that search. Try another company name or platform.</p>}
                 </div>
-              ) : <p className="directory-help">No board matched that search. Try another company name or platform.</p>}
-              {directoryStatuses.length > 0 && <div className="feed-status-list" aria-label="Selected directory board status">{directoryStatuses.map((status) =>
-                <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>
-                  {status.company}: {status.status === "loaded" ? `${status.count} listings` : status.error}
-                </span>,
-              )}</div>}
+              </details>
+              {directoryError && !directoryBoards.length && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
+              {!directoryBoards.length && !directoryError && <p className="directory-help">Loading the local employer directory…</p>}
             </div>
             {feedStatuses.length > 0 && <div className="feed-status-list" aria-label="Company feed status">{feedStatuses.map((status) =>
               <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>
