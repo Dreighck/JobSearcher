@@ -23,6 +23,7 @@ import {
   manualOnlyCompanies,
   salaryUndisclosed,
   supportedCompanyFeeds,
+  type FeedStatus,
   type JobListing,
   type JobSearchFilters,
 } from "./jobFeeds";
@@ -113,6 +114,7 @@ function App() {
   const [selectedDirectoryKeys, setSelectedDirectoryKeys] = useState<string[]>([]);
   const [directoryVisibleCount, setDirectoryVisibleCount] = useState(40);
   const [processedDirectoryKeys, setProcessedDirectoryKeys] = useState<string[]>([]);
+  const [directoryStatuses, setDirectoryStatuses] = useState<FeedStatus[]>([]);
   const [batchCooldown, setBatchCooldown] = useState(0);
   const directoryLoadStarted = useRef(false);
   const workdayDirectoryLoadStarted = useRef(false);
@@ -153,6 +155,7 @@ function App() {
       : directoryBoardsForKeywordPreset(directoryBoards, keywordPreset, 30);
     setSelectedDirectoryKeys(defaults.map((board) => `${board.platform}:${board.token}`));
     setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
   }, [directoryBoards, keywordPreset]);
 
   useEffect(() => {
@@ -192,6 +195,8 @@ function App() {
     [directoryBoards, directoryPlatform, directoryQuery],
   );
   const visibleDirectoryMatches = directoryMatches.slice(0, directoryVisibleCount);
+  const successfulDirectoryStatuses = directoryStatuses.filter((status) => status.status === "loaded");
+  const failedDirectoryStatuses = directoryStatuses.filter((status) => status.status === "failed");
   const workdayMatches = useMemo(
     () => searchDirectory(workdayBoards, workdayQuery, "workday"),
     [workdayBoards, workdayQuery],
@@ -334,12 +339,14 @@ function App() {
   function selectAllDirectoryMatches() {
     setSelectedDirectoryKeys(directoryMatches.map((board) => `${board.platform}:${board.token}`));
     setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
     setMessage(`Selected all ${directoryMatches.length.toLocaleString()} matching directory boards. Fetch results manually in batches of up to 100.`);
   }
 
   function clearDirectorySelection() {
     setSelectedDirectoryKeys([]);
     setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
   }
 
   async function fetchNextDirectoryBatch() {
@@ -363,6 +370,7 @@ function App() {
     setMessage("");
     try {
       const { listings, statuses } = await fetchSelectedDirectoryBoards(batch);
+      setDirectoryStatuses((current) => [...current, ...statuses]);
       setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map((board) => `${board.platform}:${board.token}`), ...batch.map((board) => `${board.platform}:${board.token}`)]);
       setFeedListings((current) => {
         const byUrl = new Map(current.map((listing) => [listing.url.toLowerCase(), listing]));
@@ -722,6 +730,33 @@ function App() {
                     </>
                   ) : <p className="directory-help">{workdayQuery.trim() ? "No Workday company matched that search." : "Search by company to browse Workday job boards."}</p>}
                 </div>
+              )}
+              {directoryStatuses.length > 0 && (
+                <details className="directory-status-dropdown">
+                  <summary>Directory batch results <span>{successfulDirectoryStatuses.length} loaded · {failedDirectoryStatuses.length} errors</span></summary>
+                  <div className="directory-status-groups">
+                    <details>
+                      <summary>Loaded successfully ({successfulDirectoryStatuses.length})</summary>
+                      <ul className="directory-status-list" aria-label="Successfully loaded directory boards">
+                        {successfulDirectoryStatuses.map((status, index) => (
+                          <li key={`${status.company}:${index}`}>
+                            <strong>{status.company}</strong><span>{status.count} listings</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                    <details>
+                      <summary>Had errors ({failedDirectoryStatuses.length})</summary>
+                      <ul className="directory-status-list errors" aria-label="Directory boards with errors">
+                        {failedDirectoryStatuses.map((status, index) => (
+                          <li key={`${status.company}:${index}`}>
+                            <strong>{status.company}</strong><span>{status.error}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </div>
+                </details>
               )}
             </div>
             <div className="section-heading"><div><h2>Jobs matching your filters</h2><p>{salaryQualifiedListings.length} jobs with disclosed USD salary in the selected range.</p></div></div>
