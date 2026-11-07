@@ -1,0 +1,33 @@
+* { box-sizing: border-box; }
+body { width: 380px; max-height: 600px; overflow-y: auto; margin: 0; color: #23332d; background: #f7f9f6; font: 13px "Segoe UI", Arial, sans-serif; }
+main { padding: 18px; }
+h1 { margin: 0 0 6px; color: #315d49; font-size: 17px; }
+p { line-height: 1.5; }
+.intro { margin: 0 0 14px; color: #738178; font-size: 11px; }
+.profile { padding: 10px; border: 1px solid #e1e9e1; border-radius: 6px; background: white; color: #56665c; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.profile.empty { color: #89968d; }
+button, .file-button { display: block; width: 100%; margin-top: 9px; padding: 9px 10px; border: 1px solid #dfe7df; border-radius: 5px; background: white; color: #45634e; text-align: center; font: 600 11px "Segoe UI", Arial, sans-serif; cursor: pointer; }
+.extractor { padding: 12px; border: 1px solid #e1e9e1; border-radius: 7px; background: white; }
+.extractor h2 { margin: 0 0 11px; color: #315d49; font-size: 13px; }
+.extractor > label:not(.consent) { display: block; margin: 9px 0 5px; color: #65756a; font-size: 10px; font-weight: 600; }
+.extractor input[type="url"], .extractor select { width: 100%; padding: 8px; border: 1px solid #dfe7df; border-radius: 5px; background: #fff; color: #405247; font: 11px "Segoe UI", Arial, sans-serif; }
+.consent { display: flex; align-items: flex-start; gap: 7px; margin: 9px 0; color: #6f7c73; font-size: 10px; line-height: 1.4; }
+.consent input { margin: 1px 0 0; }
+.button-row { display: flex; gap: 7px; }
+.button-row button { flex: 1; }
+.scope-note { color: #87938b; font-size: 9px; margin: 9px 0 0; }
+.results { max-height: 250px; overflow: auto; margin-top: 8px; }
+.scan-details { display: block; padding: 7px; color: #947a58; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.result-item { display: flex; gap: 7px; padding: 8px 0; border-top: 1px solid #eef1ee; color: #46564b; font-size: 10px; line-height: 1.4; }
+.result-item input { flex: 0 0 auto; margin: 2px 0 0; }
+.result-item strong { display: block; }
+.result-item span { display: block; color: #8a968e; overflow-wrap: anywhere; }
+.autofill-settings { margin-top: 12px; color: #5e7464; font-size: 10px; }
+.autofill-settings summary { cursor: pointer; }
+.autofill-settings .profile { margin-top: 8px; }
+.file-button input { display: none; }
+.primary { border-color: #395f4b; background: #395f4b; color: white; }
+.primary:disabled { border-color: #cbd6cc; background: #cbd6cc; cursor: not-allowed; }
+.quiet { border: 0; background: transparent; color: #8c655f; }
+#status { min-height: 16px; margin: 8px 0 0; color: #4d7155; font-size: 11px; }
+.boundary { margin: 9px 0 0; color: #87938b; font-size: 10px; }

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Fieldnote Autofill</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <h1>Fieldnote Autofill</h1>
+      <p class="intro">Extract public job postings from sites you own or are authorized to access.</p>
+      <section class="extractor">
+        <h2>Authorized site extractor</h2>
+        <label for="site-url">Public HTTPS page</label>
+        <input id="site-url" type="url" placeholder="https://careers.example.com/jobs" autocomplete="url">
+        <label class="consent"><input id="authorization" type="checkbox"> I own this site or am authorized to extract its public job listings.</label>
+        <button id="authorize" type="button">Approve this site</button>
+        <label for="approved-site">Approved site</label>
+        <select id="approved-site"><option value="">No approved sites yet</option></select>
+        <div class="button-row"><button id="scan" class="primary" type="button" disabled>Scan same-site job pages</button><button id="remove-site" class="quiet" type="button" disabled>Remove</button></div>
+        <p class="scope-note">Public HTTPS pages only. Same-origin job links, max 30 pages/depth 2, 0.7s between pages. Respects robots.txt. Stops on access challenges. No login, CAPTCHA handling, or LinkedIn/Indeed.</p>
+        <div id="results" class="results" aria-live="polite"></div>
+        <button id="export-jobs" type="button" hidden>Export selected jobs JSON</button>
+      </section>
+      <details class="autofill-settings">
+        <summary>Application autofill (manual, optional)</summary>
+      <div id="profile" class="profile empty">Import a profile JSON file from the Fieldnote app.</div>
+      <label class="file-button">Import profile JSON<input id="profile-file" type="file" accept=".json,application/json"></label>
+      <button id="fill" class="primary" type="button" disabled>Fill supported blank fields</button>
+      <button id="clear" class="quiet" type="button" hidden>Delete imported profile</button>
+      <p class="boundary">On LinkedIn or Indeed, only fills blank name, email, phone, or location fields after you click. You review and submit yourself.</p>
+      </details>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

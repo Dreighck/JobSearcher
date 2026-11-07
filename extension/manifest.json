@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Fieldnote Job Tools",
+  "version": "1.0.0",
+  "description": "Extract job postings from public, user-authorized sites and fill supported application fields after you invoke the extension.",
+  "permissions": ["storage"],
+  "optional_host_permissions": ["https://*/*"],
+  "action": {
+    "default_title": "Fieldnote Job Tools",
+    "default_popup": "popup.html"
+  }
+}
