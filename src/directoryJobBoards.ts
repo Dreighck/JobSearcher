@@ -23,6 +23,47 @@ export interface DirectoryBoard {
   region: string;
 }
 
+export const jobKeywordPresets = [
+  { keyword: "Software", id: "software" },
+  { keyword: "Software Engineer", id: "software-engineer" },
+  { keyword: "Software Dev", id: "software-dev" },
+  { keyword: "Consultant", id: "consultant" },
+  { keyword: "Mathematics", id: "mathematics" },
+  { keyword: "Software Architect", id: "software-architect" },
+  { keyword: "Project Manager", id: "project-manager" },
+] as const;
+
+const keywordPresetCompanies: Record<(typeof jobKeywordPresets)[number]["id"], string[]> = {
+  software: [
+    "Microsoft", "Amazon", "Google", "Apple", "Meta", "NVIDIA", "Salesforce", "Adobe", "Oracle", "IBM",
+    "Cisco", "Intel", "ServiceNow", "Uber", "Airbnb", "Stripe", "Datadog", "Cloudflare", "GitLab", "Atlassian",
+  ],
+  "software-engineer": [
+    "Google", "Microsoft", "Amazon", "Meta", "Apple", "NVIDIA", "Uber", "Netflix", "Stripe", "Datadog",
+    "Cloudflare", "GitHub", "GitLab", "Airbnb", "Coinbase", "Reddit", "Figma", "Discord", "OpenAI", "MongoDB",
+  ],
+  "software-dev": [
+    "Microsoft", "Amazon", "Google", "Oracle", "IBM", "Salesforce", "Adobe", "Cisco", "Intel", "Dell",
+    "ServiceNow", "Accenture", "Cognizant", "Infosys", "Tata Consultancy Services", "Wipro", "Capgemini", "EPAM",
+  ],
+  consultant: [
+    "Deloitte", "Accenture", "PwC", "EY", "KPMG", "McKinsey & Company", "Boston Consulting Group", "Bain & Company",
+    "Capgemini", "Booz Allen Hamilton", "CGI", "Cognizant", "Infosys", "Tata Consultancy Services", "Wipro", "IBM",
+  ],
+  mathematics: [
+    "Google", "Microsoft", "NVIDIA", "Amazon", "Meta", "Apple", "Jane Street", "Citadel", "Two Sigma",
+    "Hudson River Trading", "Bloomberg", "Palantir", "Datadog", "Stripe", "Uber", "Cloudflare",
+  ],
+  "software-architect": [
+    "Microsoft", "Amazon", "Google", "Oracle", "IBM", "Salesforce", "Adobe", "Cisco", "NVIDIA", "Meta",
+    "ServiceNow", "Datadog", "Cloudflare", "GitLab", "MongoDB", "Red Hat", "Dell", "Intel",
+  ],
+  "project-manager": [
+    "Amazon", "Microsoft", "Google", "Apple", "Meta", "Deloitte", "Accenture", "IBM", "Salesforce", "Oracle",
+    "Cisco", "Adobe", "ServiceNow", "Uber", "Capital One", "JPMorgan Chase", "Walmart", "Target",
+  ],
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -123,6 +164,33 @@ export function topDirectoryBoards(boards: DirectoryBoard[], limit = 15): Direct
     if (companies.has(company)) continue;
     companies.add(company);
     selected.push(board);
+    if (selected.length >= maximum) break;
+  }
+  return selected;
+}
+
+export function directoryBoardsForKeywordPreset(
+  boards: DirectoryBoard[],
+  presetId: (typeof jobKeywordPresets)[number]["id"],
+  limit = 30,
+): DirectoryBoard[] {
+  const maximum = Math.max(0, Math.floor(limit));
+  if (maximum === 0) return [];
+  const topBoards = topDirectoryBoards(boards, boards.length);
+  const byCompany = new Map(topBoards.map((board) => [board.company.toLowerCase(), board]));
+  const selected: DirectoryBoard[] = [];
+  const included = new Set<string>();
+  for (const company of keywordPresetCompanies[presetId]) {
+    const board = byCompany.get(company.toLowerCase());
+    if (!board || included.has(board.company.toLowerCase())) continue;
+    selected.push(board);
+    included.add(board.company.toLowerCase());
+    if (selected.length >= maximum) return selected;
+  }
+  for (const board of topBoards) {
+    if (included.has(board.company.toLowerCase())) continue;
+    selected.push(board);
+    included.add(board.company.toLowerCase());
     if (selected.length >= maximum) break;
   }
   return selected;

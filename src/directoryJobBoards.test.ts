@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  directoryBoardsForKeywordPreset,
   fetchSelectedDirectoryBoards,
   loadJobBoardDirectory,
   loadWorkdayJobBoardDirectory,
@@ -67,6 +68,23 @@ describe("job board directory", () => {
     ];
     expect(topDirectoryBoards(entries, 2).map((entry) => entry.company)).toEqual(["large", "medium"]);
     expect(topDirectoryBoards(entries, 0)).toEqual([]);
+  });
+
+  it("uses curated preset employers first and fills defaults to 30 with overall leaders", () => {
+    const entries = [
+      board("greenhouse", "Google", "google"),
+      board("ashby", "Microsoft", "microsoft"),
+      ...Array.from({ length: 30 }, (_, index) =>
+        ({ ...board("greenhouse", `Company ${index}`, `company-${index}`), open_roles: 100 - index }),
+      ),
+      board("workday", "Workday only", "workday"),
+    ];
+    const selected = directoryBoardsForKeywordPreset(entries, "software-engineer");
+
+    expect(selected).toHaveLength(30);
+    expect(selected.slice(0, 2).map((entry) => entry.company)).toEqual(["Google", "Microsoft"]);
+    expect(selected.every((entry) => entry.platform !== "workday")).toBe(true);
+    expect(new Set(selected.map((entry) => entry.company.toLowerCase())).size).toBe(30);
   });
 
   it("only loads directory entries with HTTPS URLs on the declared provider hosts", async () => {

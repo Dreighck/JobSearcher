@@ -7,6 +7,8 @@ import { parseExtractedJobs } from "./importedJobs";
 import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
   fetchSelectedDirectoryBoards,
+  directoryBoardsForKeywordPreset,
+  jobKeywordPresets,
   loadJobBoardDirectory,
   loadWorkdayJobBoardDirectory,
   searchDirectory,
@@ -108,6 +110,7 @@ function App() {
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [workdayQuery, setWorkdayQuery] = useState("");
   const [directoryTab, setDirectoryTab] = useState<"searchable" | "workday">("searchable");
+  const [keywordPreset, setKeywordPreset] = useState<(typeof jobKeywordPresets)[number]["id"] | "custom">("custom");
   const [directoryPlatform, setDirectoryPlatform] = useState<DirectoryPlatform | "all">("all");
   const [selectedDirectoryKeys, setSelectedDirectoryKeys] = useState<string[]>([]);
   const [directoryVisibleCount, setDirectoryVisibleCount] = useState(40);
@@ -140,12 +143,21 @@ function App() {
     loadJobBoardDirectory()
       .then((boards) => {
         setDirectoryBoards(boards);
-        setSelectedDirectoryKeys(topDirectoryBoards(boards).map((board) => `${board.platform}:${board.token}`));
       })
       .catch((error: unknown) => setDirectoryError(
         error instanceof Error ? error.message : "The company directory could not be loaded.",
       ));
   }, [view]);
+
+  useEffect(() => {
+    if (!directoryBoards.length) return;
+    const defaults = keywordPreset === "custom"
+      ? topDirectoryBoards(directoryBoards, 30)
+      : directoryBoardsForKeywordPreset(directoryBoards, keywordPreset, 30);
+    setSelectedDirectoryKeys(defaults.map((board) => `${board.platform}:${board.token}`));
+    setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
+  }, [directoryBoards, keywordPreset]);
 
   useEffect(() => {
     if (view !== "discover" || directoryTab !== "workday" || workdayDirectoryLoadStarted.current) return;
@@ -184,6 +196,8 @@ function App() {
     [directoryBoards, directoryPlatform, directoryQuery],
   );
   const visibleDirectoryMatches = directoryMatches.slice(0, directoryVisibleCount);
+  const successfulDirectoryStatuses = directoryStatuses.filter((status) => status.status === "loaded");
+  const failedDirectoryStatuses = directoryStatuses.filter((status) => status.status === "failed");
   const workdayMatches = useMemo(
     () => searchDirectory(workdayBoards, workdayQuery, "workday"),
     [workdayBoards, workdayQuery],
@@ -197,6 +211,23 @@ function App() {
 
   function updateSearchFilters(changes: Partial<JobSearchFilters>) {
     setSearchFilters((current) => ({ ...current, ...changes }));
+  }
+
+  function applyKeywordPreset(value: string) {
+    if (value === "custom") {
+      setKeywordPreset("custom");
+      updateSearchFilters({ keywords: "" });
+      return;
+    }
+    const preset = jobKeywordPresets.find((item) => item.id === value);
+    if (!preset) return;
+    setKeywordPreset(preset.id);
+    updateSearchFilters({ keywords: preset.keyword });
+  }
+
+  function updateKeywordQuery(keywords: string) {
+    if (keywordPreset !== "custom") setKeywordPreset("custom");
+    updateSearchFilters({ keywords });
   }
 
   function updateProfile(profile: Profile) {
@@ -374,7 +405,6 @@ function App() {
     try {
       const boards = await loadJobBoardDirectory();
       setDirectoryBoards(boards);
-      setSelectedDirectoryKeys(topDirectoryBoards(boards).map((board) => `${board.platform}:${board.token}`));
       directoryLoadStarted.current = true;
     } catch (error) {
       setDirectoryError(error instanceof Error ? error.message : "The searchable company directory could not be loaded.");
@@ -596,7 +626,13 @@ function App() {
             <div className="form-card search-filter-card">
               <div className="form-card-heading"><div><h2>Search filters</h2><p>Filters update results as you type. Separate keywords with commas to match any term.</p></div><button className="text-button" onClick={() => setSearchFilters(defaultSearchFilters)}>Reset filters</button></div>
               <div className="fields-grid">
-                <label className="span-two">Keywords<input type="search" value={searchFilters.keywords} placeholder="e.g. backend, Python, staff engineer" onChange={(event) => updateSearchFilters({ keywords: event.target.value })} /></label>
+                <label>Keyword preset
+                  <select value={keywordPreset} onChange={(event) => applyKeywordPreset(event.target.value)}>
+                    <option value="custom">Custom keywords (top 30 companies)</option>
+                    {jobKeywordPresets.map((preset) => <option value={preset.id} key={preset.id}>{preset.keyword}</option>)}
+                  </select>
+                </label>
+                <label className="span-two">Keywords<input type="search" value={searchFilters.keywords} placeholder="e.g. backend, Python, staff engineer" onChange={(event) => updateKeywordQuery(event.target.value)} /></label>
                 <label>Company or job board<input type="search" value={searchFilters.company} placeholder="Any company or source" onChange={(event) => updateSearchFilters({ company: event.target.value })} /></label>
                 <label>Location preference<select value={searchFilters.locationMode} onChange={(event) => updateSearchFilters({ locationMode: event.target.value as JobSearchFilters["locationMode"] })}><option value="preferred">Remote (not known international) or Louisiana</option><option value="anywhere">Anywhere</option><option value="custom">Specific location</option></select></label>
                 {searchFilters.locationMode === "custom" && <label>Location contains<input type="search" value={searchFilters.location} placeholder="e.g. Austin, Texas" onChange={(event) => updateSearchFilters({ location: event.target.value })} /></label>}
@@ -620,14 +656,15 @@ function App() {
               {directoryTab === "searchable" ? (
                 <>
                   <div className="directory-heading directory-tab-heading">
-                    <div><h2>Choose employers to search</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} searchable public boards; the top 15 by listed roles are preselected.` : directoryError || "Loading the searchable employer directory…"}</p></div>
+                    <div><h2>Choose employers to search</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} searchable public boards; 30 companies are selected by default. Choose a keyword preset for a tailored default list, or add and remove companies below.` : directoryError || "Loading the searchable employer directory…"}</p></div>
                     <button className="button button-outline" onClick={fetchNextDirectoryBatch} disabled={loadingFeeds || batchCooldown > 0 || pendingDirectoryBoardCount === 0}>
                       {loadingFeeds ? "Fetching batch…" : batchCooldown > 0 ? `Next batch in ${batchCooldown}s` : `Fetch next batch (${Math.min(100, pendingDirectoryBoardCount)} max)`}
                     </button>
                   </div>
                   <details className="directory-dropdown">
-                    <summary>Searchable employer list <span>{selectedDirectoryKeys.length.toLocaleString()} selected</span></summary>
+                    <summary>Employer defaults and batch selection <span>{selectedDirectoryKeys.length.toLocaleString()} selected</span></summary>
                     <div className="directory-dropdown-panel">
+                  <p className="directory-help">Use the checkboxes to add or remove companies from the current defaults. These selections are also the companies used by Fetch next batch.</p>
                   <div className="directory-controls">
                     <label>Search company, platform, or region
                       <input type="search" value={directoryQuery} onChange={(event) => { setDirectoryQuery(event.target.value); setDirectoryVisibleCount(40); }} placeholder="e.g. NVIDIA, Stripe, healthcare" />
@@ -696,11 +733,33 @@ function App() {
                   ) : <p className="directory-help">{workdayQuery.trim() ? "No Workday company matched that search." : "Search by company to browse Workday job boards."}</p>}
                 </div>
               )}
-              {directoryStatuses.length > 0 && <div className="feed-status-list" aria-label="Directory batch status">{directoryStatuses.slice(-100).map((status, index) =>
-                <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={`${status.company}:${index}`}>
-                  {status.company}: {status.status === "loaded" ? `${status.count} listings` : status.error}
-                </span>,
-              )}</div>}
+              {directoryStatuses.length > 0 && (
+                <details className="directory-status-dropdown">
+                  <summary>Directory batch results <span>{successfulDirectoryStatuses.length} loaded · {failedDirectoryStatuses.length} errors</span></summary>
+                  <div className="directory-status-groups">
+                    <details>
+                      <summary>Loaded successfully ({successfulDirectoryStatuses.length})</summary>
+                      <div className="feed-status-list" aria-label="Successfully loaded directory boards">
+                        {successfulDirectoryStatuses.map((status, index) => (
+                          <span className="feed-status loaded" key={`${status.company}:${index}`}>
+                            {status.company}: {status.count} listings
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                    <details>
+                      <summary>Had errors ({failedDirectoryStatuses.length})</summary>
+                      <div className="feed-status-list" aria-label="Directory boards with errors">
+                        {failedDirectoryStatuses.map((status, index) => (
+                          <span className="feed-status failed" key={`${status.company}:${index}`}>
+                            {status.company}: {status.error}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                </details>
+              )}
             </div>
             {feedStatuses.length > 0 && <div className="feed-status-list" aria-label="Company feed status">{feedStatuses.map((status) =>
               <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>
