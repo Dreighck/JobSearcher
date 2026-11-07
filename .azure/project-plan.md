@@ -16,7 +16,7 @@ The extension may extract job listings only from a public HTTPS site origin the 
 - **Resume:** Import the existing `Drake-Menard.docx` locally. Let the user review and correct extracted profile information.
 - **Job discovery:** On user action, request listings from public employer feeds that permit unauthenticated access: Greenhouse feeds for Stripe, GitLab, Elastic, Datadog, Cloudflare, and MongoDB; Ashby feeds for Render, Linear, Ramp, OpenAI, and Notion; and public job-board APIs/feeds from Remote OK, Remotive, Arbeitnow, Jobicy, and We Work Remotely. Provide direct careers links/manual alert import for Atlassian, CrowdStrike, Confluent, Automattic, Red Hat, HubSpot, NVIDIA, and BOK Financial until a documented public feed is verified. The optional authorized-site extension may separately extract from explicitly approved domains.
 - **Job input:** Paste job-alert email/text one listing at a time. Store manually entered URLs as references; do not fetch or scrape them.
-- **Matching:** Prioritize software engineering, backend, full-stack, platform, and infrastructure roles; prefer US remote or Lafayette, Louisiana. Require a published USD salary minimum of at least $140,000 for qualified matches. Keep salary-unverified roles separate until a selected posting's public detail feed is checked; exclude disclosed ranges with minimum under $140,000 from qualified matches. Show the factors behind each match.
+- **Matching:** Default to software engineering, backend, full-stack, platform, and infrastructure roles; prefer remote or Lafayette, Louisiana. Let the user adjust keyword, employer, location, work arrangement, role-scope, salary minimum/maximum, and whether to include undisclosed salaries. Filter loaded listings locally, keep salary-unverified roles separate, and compare disclosed USD ranges to the selected annual salary range.
 - **Drafting:** Create editable cover-letter drafts locally from the resume profile and pasted job description, using templates/rules rather than external AI calls.
 - **Tracking:** Let the user record application status, notes, and follow-up dates. The user reviews and submits applications manually.
 - **Privacy:** Keep resume-derived profile data, job records, and drafts on the user's device in browser storage. Searches contact only supported public job feeds; extension scans contact only a user-approved origin. Never send resume/profile data to either. Provide per-record deletion and clear-all controls.
@@ -51,7 +51,7 @@ The extension may extract job listings only from a public HTTPS site origin the 
 
 - Import and locally parse the supplied DOCX resume, with editable extracted profile details.
 - Search supported employer and remote-job-board feeds; extract from explicitly approved public company sites; import selected extraction JSON or one job-alert listing at a time; add, edit, and remove job records.
-- Show an explainable match summary based on role, skills, location/remote preference, and a hard $140,000 published minimum salary requirement.
+- Allow users to filter loaded jobs by keywords, company/source, location, work arrangement, role category, and adjustable annual salary range; include or hide undisclosed salaries.
 - Create and edit a cover-letter draft from the local profile and pasted job description.
 - Track user-selected application statuses, notes, and follow-up dates.
 - Export application/job records to CSV.

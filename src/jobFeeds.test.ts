@@ -8,7 +8,9 @@ import {
   salaryFromPayInputRanges,
   salaryUndisclosed,
   fetchCompanyFeeds,
+  matchesJobSearch,
   type JobListing,
+  type JobSearchFilters,
 } from "./jobFeeds";
 
 function listing(overrides: Partial<JobListing> = {}): JobListing {
@@ -27,6 +29,18 @@ function listing(overrides: Partial<JobListing> = {}): JobListing {
     ...overrides,
   };
 }
+
+const defaultFilters: JobSearchFilters = {
+  keywords: "",
+  company: "",
+  location: "",
+  locationMode: "preferred",
+  workArrangement: "any",
+  minimumSalary: 140000,
+  maximumSalary: null,
+  includeUndisclosedSalary: true,
+  engineeringRolesOnly: true,
+};
 
 describe("authorized job feed filters", () => {
   it("extracts a disclosed USD salary range from job text", () => {
@@ -97,5 +111,51 @@ describe("authorized job feed filters", () => {
     expect(isTargetLocation(listing({ location: "Remote: United States" }))).toBe(true);
     expect(isTargetLocation(listing({ location: "Lafayette, Louisiana" }))).toBe(true);
     expect(isTargetLocation(listing({ location: "Remote: United Kingdom" }))).toBe(false);
+  });
+
+  it("applies keyword, employer, work arrangement, and adjustable salary filters", () => {
+    const job = listing({
+      title: "Staff Backend Engineer",
+      company: "Example Systems",
+      description: "Build reliable services with TypeScript and PostgreSQL.",
+      location: "Remote: United States",
+      salary: { min: 150000, max: 190000, currency: "USD" },
+    });
+    expect(matchesJobSearch(job, {
+      ...defaultFilters,
+      keywords: "python, typescript",
+      company: "example",
+      minimumSalary: 160000,
+      maximumSalary: 180000,
+    })).toBe(true);
+    expect(matchesJobSearch(job, { ...defaultFilters, keywords: "designer, python" })).toBe(false);
+    expect(matchesJobSearch(job, { ...defaultFilters, company: "other company" })).toBe(false);
+    expect(matchesJobSearch(job, { ...defaultFilters, workArrangement: "hybrid" })).toBe(false);
+    expect(matchesJobSearch(job, { ...defaultFilters, minimumSalary: 195000 })).toBe(false);
+  });
+
+  it("allows location and role scope changes and explicitly controls undisclosed salary results", () => {
+    const executive = listing({
+      title: "Director of Product",
+      location: "New York, NY",
+      salary: null,
+    });
+    expect(matchesJobSearch(executive, {
+      ...defaultFilters,
+      locationMode: "anywhere",
+      engineeringRolesOnly: false,
+    })).toBe(true);
+    expect(matchesJobSearch(executive, {
+      ...defaultFilters,
+      locationMode: "anywhere",
+      engineeringRolesOnly: false,
+      includeUndisclosedSalary: false,
+    })).toBe(false);
+    expect(matchesJobSearch(executive, {
+      ...defaultFilters,
+      locationMode: "custom",
+      location: "Boston",
+      engineeringRolesOnly: false,
+    })).toBe(false);
   });
 });

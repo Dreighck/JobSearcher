@@ -6,16 +6,15 @@ import { exportJobs } from "./export";
 import { parseExtractedJobs } from "./importedJobs";
 import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
-  confirmedSalaryAtLeast,
   fetchCompanyFeeds,
-  isTargetLocation,
-  isTargetRole,
   loadListingDetails,
+  matchesJobSearch,
   manualOnlyCompanies,
   salaryUndisclosed,
   supportedCompanyFeeds,
   type FeedStatus,
   type JobListing,
+  type JobSearchFilters,
 } from "./jobFeeds";
 import { getMatch } from "./matching";
 import { deleteAllData, loadData, saveData } from "./storage";
@@ -29,6 +28,18 @@ import {
 
 type View = "overview" | "discover" | "jobs" | "profile";
 const statuses: ApplicationStatus[] = ["Saved", "Preparing", "Applied", "Interviewing", "Offer", "Closed"];
+
+const defaultSearchFilters: JobSearchFilters = {
+  keywords: "",
+  company: "",
+  location: "",
+  locationMode: "preferred",
+  workArrangement: "any",
+  minimumSalary: 140000,
+  maximumSalary: null,
+  includeUndisclosedSalary: true,
+  engineeringRolesOnly: true,
+};
 
 function makeId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -80,6 +91,7 @@ function App() {
   const [feedStatuses, setFeedStatuses] = useState<FeedStatus[]>([]);
   const [loadingFeeds, setLoadingFeeds] = useState(false);
   const [loadingListingId, setLoadingListingId] = useState<string | null>(null);
+  const [searchFilters, setSearchFilters] = useState<JobSearchFilters>(defaultSearchFilters);
   const fileInput = useRef<HTMLInputElement>(null);
   const extractedJobsInput = useRef<HTMLInputElement>(null);
 
@@ -108,15 +120,13 @@ function App() {
     interviewing: data.jobs.filter((job) => job.status === "Interviewing").length,
     offers: data.jobs.filter((job) => job.status === "Offer").length,
   };
-  const locationAndRoleMatches = feedListings.filter((listing) =>
-    isTargetRole(listing) && isTargetLocation(listing),
-  );
-  const salaryQualifiedListings = locationAndRoleMatches.filter((listing) =>
-    confirmedSalaryAtLeast(listing),
-  );
-  const salaryUnknownListings = locationAndRoleMatches.filter((listing) =>
-    salaryUndisclosed(listing),
-  );
+  const filteredListings = feedListings.filter((listing) => matchesJobSearch(listing, searchFilters));
+  const salaryQualifiedListings = filteredListings.filter((listing) => !salaryUndisclosed(listing));
+  const salaryUnknownListings = filteredListings.filter(salaryUndisclosed);
+
+  function updateSearchFilters(changes: Partial<JobSearchFilters>) {
+    setSearchFilters((current) => ({ ...current, ...changes }));
+  }
 
   function updateProfile(profile: Profile) {
     setData((current) => ({ ...current, profile, profileReady: true }));
@@ -217,10 +227,10 @@ function App() {
       setFeedListings((current) => current.map((item) =>
         item.source === detailed.source && item.id === detailed.id ? detailed : item,
       ));
-      if (detailed.salary && detailed.salary.min < 140000) {
-        setMessage("This listing’s published salary range starts below $140,000, so it is not shown as a qualifying role.");
-      } else if (detailed.salary && detailed.salary.min >= 140000) {
-        setMessage("Job details loaded. The published minimum meets your $140,000 salary floor.");
+      if (detailed.salary && !matchesJobSearch(detailed, searchFilters)) {
+        setMessage("Job details loaded. The updated salary or listing details do not match your current search filters.");
+      } else if (detailed.salary) {
+        setMessage("Job details loaded. The published salary matches your current search range.");
       } else {
         setMessage("Job details loaded, but no salary range was found. It remains in the undisclosed-salary section.");
       }
@@ -238,10 +248,6 @@ function App() {
     }
     if (!safeExternalUrl(listing.url)) {
       setMessage("This job source returned an invalid application link.");
-      return;
-    }
-    if (listing.salary && listing.salary.min < 140000) {
-      setMessage("This role’s published salary range starts below your $140,000 floor.");
       return;
     }
     const sourceId = `${listing.source.toLowerCase()}:${listing.id}`;
@@ -424,26 +430,49 @@ function App() {
         {view === "discover" && (
           <section className="page">
             <div className="welcome-row">
-              <div><div className="eyebrow">OFFICIAL COMPANY FEEDS</div><h1>Find your <em>next role.</em></h1><p className="page-subtitle">Search selected employers for software engineering roles that match your remote/Lafayette preference.</p></div>
+              <div><div className="eyebrow">PUBLIC JOB FEEDS</div><h1>Find your <em>next role.</em></h1><p className="page-subtitle">Search public employer and job-board listings, then tune the results to your preferences.</p></div>
               <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds}>{loadingFeeds ? "Loading feeds…" : "Refresh company feeds"} <span>↻</span></button>
             </div>
-            <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads official public job-board feeds from the supported employers. Your resume and profile are not sent. Listings are filtered locally for software roles, remote/Lafayette location, and a published salary floor of $140,000. You review and submit applications yourself.</p></div></div>
+            <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads public job-board feeds from supported sources. Your resume and profile are not sent. Search filters are applied locally to the listings; you review and submit applications yourself.</p></div></div>
+            <div className="form-card search-filter-card">
+              <div className="form-card-heading"><div><h2>Search filters</h2><p>Filters update results as you type. Separate keywords with commas to match any term.</p></div><button className="text-button" onClick={() => setSearchFilters(defaultSearchFilters)}>Reset filters</button></div>
+              <div className="fields-grid">
+                <label className="span-two">Keywords<input type="search" value={searchFilters.keywords} placeholder="e.g. backend, Python, staff engineer" onChange={(event) => updateSearchFilters({ keywords: event.target.value })} /></label>
+                <label>Company or job board<input type="search" value={searchFilters.company} placeholder="Any company or source" onChange={(event) => updateSearchFilters({ company: event.target.value })} /></label>
+                <label>Location preference<select value={searchFilters.locationMode} onChange={(event) => updateSearchFilters({ locationMode: event.target.value as JobSearchFilters["locationMode"] })}><option value="preferred">Remote (not known international) or Louisiana</option><option value="anywhere">Anywhere</option><option value="custom">Specific location</option></select></label>
+                {searchFilters.locationMode === "custom" && <label>Location contains<input type="search" value={searchFilters.location} placeholder="e.g. Austin, Texas" onChange={(event) => updateSearchFilters({ location: event.target.value })} /></label>}
+                <label>Work arrangement<select value={searchFilters.workArrangement} onChange={(event) => updateSearchFilters({ workArrangement: event.target.value as JobSearchFilters["workArrangement"] })}><option value="any">Any arrangement</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">On-site</option></select></label>
+                <label>Minimum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.minimumSalary ?? ""} placeholder="No minimum" onChange={(event) => updateSearchFilters({ minimumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
+                <label>Maximum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.maximumSalary ?? ""} placeholder="No maximum" onChange={(event) => updateSearchFilters({ maximumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
+                <label className="search-checkbox"><input type="checkbox" checked={searchFilters.engineeringRolesOnly} onChange={(event) => updateSearchFilters({ engineeringRolesOnly: event.target.checked })} /> Engineering and software roles only</label>
+                <label className="search-checkbox"><input type="checkbox" checked={searchFilters.includeUndisclosedSalary} onChange={(event) => updateSearchFilters({ includeUndisclosedSalary: event.target.checked })} /> Include jobs with undisclosed salary</label>
+              </div>
+              <p className="search-filter-note">Salary ranges must overlap your selected range. Only disclosed USD salaries can be compared; jobs without a salary are listed separately when included.</p>
+            </div>
             <p className="feed-company-names">Integrated feeds: {supportedCompanyFeeds.map((source) => source.company).join(", ")}.</p>
             {feedStatuses.length > 0 && <div className="feed-status-list" aria-label="Company feed status">{feedStatuses.map((status) =>
               <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>
                 {status.company}: {status.status === "loaded" ? `${status.count} listings` : status.error}
               </span>,
             )}</div>}
-            <div className="section-heading"><div><h2>Published salary meets $140,000 floor</h2><p>{salaryQualifiedListings.length} roles with confirmed salary minimums in remote or Lafayette locations.</p></div></div>
-            {salaryQualifiedListings.length ? <div className="feed-job-list">{salaryQualifiedListings.map((listing) =>
-              <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
-                onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />,
-            )}</div> : <div className="empty-state"><h3>{feedListings.length ? "No confirmed $140k+ matches right now." : "Search official company feeds."}</h3><p>Roles with unpublished compensation are kept in a separate list. Some companies do not expose a public structured feed.</p></div>}
-            <div className="section-heading salary-unknown-heading"><div><h2>Salary not yet verified</h2><p>{salaryUnknownListings.length} additional role matches without a salary range in the feed summary. Load a posting’s details to check whether its official listing includes pay; these are not confirmed $140k+ roles.</p></div></div>
-            {salaryUnknownListings.length ? <div className="feed-job-list">{salaryUnknownListings.map((listing) =>
-              <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
-                onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />,
-            )}</div> : <p className="empty-hint">No roles need salary verification right now.</p>}
+            <div className="section-heading"><div><h2>Jobs matching your filters</h2><p>{salaryQualifiedListings.length} jobs with disclosed USD salary in the selected range.</p></div></div>
+            {salaryQualifiedListings.length ? (
+              <div className="feed-job-list">{salaryQualifiedListings.map((listing) => (
+                <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
+                  onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />
+              ))}</div>
+            ) : <div className="empty-state"><h3>{feedListings.length ? "No jobs match these filters." : "Refresh public job feeds to search."}</h3><p>Try broadening your keywords, location, role, or salary range. Some feeds may not disclose compensation.</p></div>}
+            {searchFilters.includeUndisclosedSalary && (
+              <>
+                <div className="section-heading salary-unknown-heading"><div><h2>Salary not yet verified</h2><p>{salaryUnknownListings.length} jobs matching the other filters without a salary range in the feed. Load a posting’s details to check its official listing.</p></div></div>
+                {salaryUnknownListings.length ? (
+                  <div className="feed-job-list">{salaryUnknownListings.map((listing) => (
+                    <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
+                      onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />
+                  ))}</div>
+                ) : <p className="empty-hint">No roles need salary verification right now.</p>}
+              </>
+            )}
             <details className="manual-company-list"><summary>Other companies (career links and manual import)</summary><p>These companies’ public feeds are not yet integrated. Open their official careers site and use Import alert text or Add a job; the app will not scrape these pages.</p>
               <div>{manualOnlyCompanies.map((company) => <a href={company.url} target="_blank" rel="noreferrer" key={company.company}>{company.company} ↗</a>)}</div>
             </details>

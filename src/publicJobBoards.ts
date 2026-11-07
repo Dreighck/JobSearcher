@@ -3,7 +3,7 @@ import type { FeedStatus, JobListing, SalaryRange } from "./jobFeeds";
 
 export const supportedPublicJobBoards = [
   { company: "Remote OK", id: "remoteok", url: "https://remoteok.com/api", sourceUrl: "https://remoteok.com" },
-  { company: "Remotive", id: "remotive", url: "https://remotive.com/api/remote-jobs?search=software%20engineer", sourceUrl: "https://remotive.com/remote-jobs" },
+  { company: "Remotive", id: "remotive", url: "https://remotive.com/api/remote-jobs", sourceUrl: "https://remotive.com/remote-jobs" },
   { company: "Arbeitnow", id: "arbeitnow", url: "https://www.arbeitnow.com/api/job-board-api", sourceUrl: "https://www.arbeitnow.com" },
   { company: "Jobicy", id: "jobicy", url: "https://jobicy.com/api/v2/remote-jobs?count=100", sourceUrl: "https://jobicy.com" },
   { company: "We Work Remotely", id: "weworkremotely", url: "https://weworkremotely.com/remote-jobs.rss", sourceUrl: "https://weworkremotely.com/remote-jobs" },

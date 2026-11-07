@@ -26,6 +26,18 @@ export interface FeedStatus {
   error?: string;
 }
 
+export interface JobSearchFilters {
+  keywords: string;
+  company: string;
+  location: string;
+  locationMode: "preferred" | "anywhere" | "custom";
+  workArrangement: "any" | "remote" | "hybrid" | "onsite";
+  minimumSalary: number | null;
+  maximumSalary: number | null;
+  includeUndisclosedSalary: boolean;
+  engineeringRolesOnly: boolean;
+}
+
 export const supportedCompanyFeeds = [
   { company: "Stripe", url: "https://stripe.com/jobs", provider: "greenhouse", board: "stripe" },
   { company: "GitLab", url: "https://about.gitlab.com/jobs/", provider: "greenhouse", board: "gitlab" },
@@ -319,6 +331,42 @@ export function confirmedSalaryAtLeast(job: JobListing, minimum = 140000): boole
 
 export function salaryUndisclosed(job: JobListing): boolean {
   return !job.salary;
+}
+
+export function matchesJobSearch(job: JobListing, filters: JobSearchFilters): boolean {
+  if (filters.engineeringRolesOnly && !isTargetRole(job)) return false;
+
+  if (filters.locationMode === "preferred" && !isTargetLocation(job)) return false;
+  if (filters.locationMode === "custom" &&
+    (!filters.location.trim() || !job.location.toLowerCase().includes(filters.location.trim().toLowerCase()))) return false;
+
+  if (filters.company.trim()) {
+    const companyQuery = filters.company.trim().toLowerCase();
+    if (!job.company.toLowerCase().includes(companyQuery) &&
+      !job.source.toLowerCase().includes(companyQuery)) return false;
+  }
+
+  if (filters.keywords.trim()) {
+    const searchableText = `${job.title} ${job.company} ${job.location} ${job.description} ${job.source}`.toLowerCase();
+    const terms = filters.keywords.split(",").map((term) => term.trim().toLowerCase()).filter(Boolean);
+    if (!terms.some((term) => searchableText.includes(term))) return false;
+  }
+
+  if (filters.workArrangement !== "any") {
+    const location = job.location.toLowerCase();
+    const isRemote = /\bremote\b/.test(location);
+    const isHybrid = /\bhybrid\b/.test(location);
+    const isOnsite = /\b(on[- ]?site|in[- ]office|office[- ]based)\b/.test(location);
+    if (filters.workArrangement === "remote" && !isRemote) return false;
+    if (filters.workArrangement === "hybrid" && !isHybrid) return false;
+    if (filters.workArrangement === "onsite" && !isOnsite) return false;
+  }
+
+  if (!job.salary) return filters.includeUndisclosedSalary;
+  if (job.salary.currency !== "USD") return false;
+  if (filters.minimumSalary !== null && (job.salary.max ?? job.salary.min) < filters.minimumSalary) return false;
+  if (filters.maximumSalary !== null && job.salary.min > filters.maximumSalary) return false;
+  return true;
 }
 
 export async function loadListingDetails(listing: JobListing): Promise<JobListing> {
