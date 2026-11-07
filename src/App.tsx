@@ -39,6 +39,7 @@ import {
 
 type View = "overview" | "discover" | "jobs" | "profile";
 const statuses: ApplicationStatus[] = ["Saved", "Preparing", "Applied", "Interviewing", "Offer", "Closed"];
+const FEED_RESULTS_PAGE_SIZE = 20;
 
 const defaultSearchFilters: JobSearchFilters = {
   keywords: "",
@@ -101,6 +102,8 @@ function App() {
   const [loadingFeeds, setLoadingFeeds] = useState(false);
   const [loadingListingId, setLoadingListingId] = useState<string | null>(null);
   const [searchFilters, setSearchFilters] = useState<JobSearchFilters>(defaultSearchFilters);
+  const [salaryQualifiedPage, setSalaryQualifiedPage] = useState(1);
+  const [salaryUnknownPage, setSalaryUnknownPage] = useState(1);
   const [directoryBoards, setDirectoryBoards] = useState<DirectoryBoard[]>([]);
   const [workdayBoards, setWorkdayBoards] = useState<DirectoryBoard[]>([]);
   const [directoryError, setDirectoryError] = useState("");
@@ -135,6 +138,11 @@ function App() {
     }, 180);
     return () => window.clearTimeout(timer);
   }, [data, ready]);
+
+  useEffect(() => {
+    setSalaryQualifiedPage(1);
+    setSalaryUnknownPage(1);
+  }, [feedListings, searchFilters]);
 
   useEffect(() => {
     if (view !== "discover" || directoryLoadStarted.current) return;
@@ -190,6 +198,14 @@ function App() {
   const filteredListings = feedListings.filter((listing) => matchesJobSearch(listing, searchFilters));
   const salaryQualifiedListings = filteredListings.filter((listing) => !salaryUndisclosed(listing));
   const salaryUnknownListings = filteredListings.filter(salaryUndisclosed);
+  const visibleSalaryQualifiedListings = salaryQualifiedListings.slice(
+    (salaryQualifiedPage - 1) * FEED_RESULTS_PAGE_SIZE,
+    salaryQualifiedPage * FEED_RESULTS_PAGE_SIZE,
+  );
+  const visibleSalaryUnknownListings = salaryUnknownListings.slice(
+    (salaryUnknownPage - 1) * FEED_RESULTS_PAGE_SIZE,
+    salaryUnknownPage * FEED_RESULTS_PAGE_SIZE,
+  );
   const directoryMatches = useMemo(
     () => searchDirectory(directoryBoards, directoryQuery, directoryPlatform),
     [directoryBoards, directoryPlatform, directoryQuery],
@@ -761,21 +777,38 @@ function App() {
             </div>
             <div className="section-heading"><div><h2>Jobs matching your filters</h2><p>{salaryQualifiedListings.length} jobs with disclosed USD salary in the selected range.</p></div></div>
             {salaryQualifiedListings.length ? (
-              <div className="feed-job-list">{salaryQualifiedListings.map((listing) => (
+              <>
+              <div className="feed-job-list">{visibleSalaryQualifiedListings.map((listing) => (
                 <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
                   onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />
               ))}</div>
+              <JobListingPagination
+                currentPage={salaryQualifiedPage}
+                itemCount={salaryQualifiedListings.length}
+                pageSize={FEED_RESULTS_PAGE_SIZE}
+                onPageChange={setSalaryQualifiedPage}
+              />
+              </>
             ) : <div className="empty-state"><h3>{feedListings.length ? "No jobs match these filters." : "Refresh public job feeds to search."}</h3><p>Try broadening your keywords, location, role, or salary range. Some feeds may not disclose compensation.</p></div>}
             {searchFilters.includeUndisclosedSalary && (
-              <>
-                <div className="section-heading salary-unknown-heading"><div><h2>Salary not yet verified</h2><p>{salaryUnknownListings.length} jobs matching the other filters without a salary range in the feed. Load a posting’s details to check its official listing.</p></div></div>
+              <details className="salary-unknown-section">
+                <summary><span><strong>Salary not yet verified</strong><small>{salaryUnknownListings.length} jobs matching the other filters without a salary range in the feed.</small></span></summary>
+                <p className="salary-unknown-description">Load a posting’s details to check its official listing.</p>
                 {salaryUnknownListings.length ? (
-                  <div className="feed-job-list">{salaryUnknownListings.map((listing) => (
+                  <>
+                  <div className="feed-job-list">{visibleSalaryUnknownListings.map((listing) => (
                     <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
                       onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />
                   ))}</div>
+                  <JobListingPagination
+                    currentPage={salaryUnknownPage}
+                    itemCount={salaryUnknownListings.length}
+                    pageSize={FEED_RESULTS_PAGE_SIZE}
+                    onPageChange={setSalaryUnknownPage}
+                  />
+                  </>
                 ) : <p className="empty-hint">No roles need salary verification right now.</p>}
-              </>
+              </details>
             )}
             <details className="manual-company-list"><summary>Other companies (career links and manual import)</summary><p>These companies’ public feeds are not yet integrated. Open their official careers site and use Import alert text or Add a job; the app will not scrape these pages.</p>
               <div>{manualOnlyCompanies.map((company) => <a href={company.url} target="_blank" rel="noreferrer" key={company.company}>{company.company} ↗</a>)}</div>
@@ -822,6 +855,38 @@ function App() {
         onSave={saveAlert}
       />}
     </div>
+  );
+}
+
+function JobListingPagination({
+  currentPage,
+  itemCount,
+  pageSize,
+  onPageChange,
+}: {
+  currentPage: number;
+  itemCount: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = Math.ceil(itemCount / pageSize);
+  if (pageCount <= 1) return null;
+
+  const firstItem = (currentPage - 1) * pageSize + 1;
+  const lastItem = Math.min(currentPage * pageSize, itemCount);
+  return (
+    <nav className="feed-pagination" aria-label="Job listing pages">
+      <span>Showing {firstItem}–{lastItem} of {itemCount}</span>
+      <div>
+        <button type="button" className="button button-outline" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage <= 1}>
+          Previous
+        </button>
+        <span>Page {currentPage} of {pageCount}</span>
+        <button type="button" className="button button-outline" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage >= pageCount}>
+          Next
+        </button>
+      </div>
+    </nav>
   );
 }
 
