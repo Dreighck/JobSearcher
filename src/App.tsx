@@ -6,6 +6,13 @@ import { exportJobs } from "./export";
 import { parseExtractedJobs } from "./importedJobs";
 import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
+  fetchSelectedDirectoryBoards,
+  loadJobBoardDirectory,
+  searchDirectory,
+  type DirectoryBoard,
+  type DirectoryPlatform,
+} from "./directoryJobBoards";
+import {
   fetchCompanyFeeds,
   loadListingDetails,
   matchesJobSearch,
@@ -91,6 +98,13 @@ function App() {
   const [loadingFeeds, setLoadingFeeds] = useState(false);
   const [loadingListingId, setLoadingListingId] = useState<string | null>(null);
   const [searchFilters, setSearchFilters] = useState<JobSearchFilters>(defaultSearchFilters);
+  const [directoryBoards, setDirectoryBoards] = useState<DirectoryBoard[]>([]);
+  const [directoryError, setDirectoryError] = useState("");
+  const [directoryQuery, setDirectoryQuery] = useState("");
+  const [directoryPlatform, setDirectoryPlatform] = useState<DirectoryPlatform | "all">("all");
+  const [selectedDirectoryKeys, setSelectedDirectoryKeys] = useState<string[]>([]);
+  const [directoryStatuses, setDirectoryStatuses] = useState<FeedStatus[]>([]);
+  const directoryLoadStarted = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const extractedJobsInput = useRef<HTMLInputElement>(null);
 
@@ -109,6 +123,16 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [data, ready]);
 
+  useEffect(() => {
+    if (view !== "discover" || directoryLoadStarted.current) return;
+    directoryLoadStarted.current = true;
+    loadJobBoardDirectory()
+      .then(setDirectoryBoards)
+      .catch((error: unknown) => setDirectoryError(
+        error instanceof Error ? error.message : "The company directory could not be loaded.",
+      ));
+  }, [view]);
+
   const sortedJobs = useMemo(
     () => [...data.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     [data.jobs],
@@ -122,6 +146,10 @@ function App() {
   const filteredListings = feedListings.filter((listing) => matchesJobSearch(listing, searchFilters));
   const salaryQualifiedListings = filteredListings.filter((listing) => !salaryUndisclosed(listing));
   const salaryUnknownListings = filteredListings.filter(salaryUndisclosed);
+  const directoryMatches = useMemo(
+    () => searchDirectory(directoryBoards, directoryQuery, directoryPlatform),
+    [directoryBoards, directoryPlatform, directoryQuery],
+  );
 
   function updateSearchFilters(changes: Partial<JobSearchFilters>) {
     setSearchFilters((current) => ({ ...current, ...changes }));
@@ -219,6 +247,53 @@ function App() {
     }
   }
 
+  function toggleDirectoryBoard(board: DirectoryBoard) {
+    if (board.platform === "workday") return;
+    const key = `${board.platform}:${board.token}`;
+    setSelectedDirectoryKeys((current) => {
+      if (current.includes(key)) return current.filter((value) => value !== key);
+      if (current.length >= 10) {
+        setMessage("Select up to 10 company boards per search to keep requests bounded.");
+        return current;
+      }
+      return [...current, key];
+    });
+  }
+
+  async function searchSelectedBoards() {
+    const selected = directoryBoards.filter((board) =>
+      selectedDirectoryKeys.includes(`${board.platform}:${board.token}`),
+    );
+    if (!selected.length) {
+      setMessage("Search the directory and select at least one supported company board.");
+      return;
+    }
+    setLoadingFeeds(true);
+    setMessage("");
+    try {
+      const { listings, statuses } = await fetchSelectedDirectoryBoards(selected);
+      setDirectoryStatuses(statuses);
+      setFeedListings((current) => {
+        const byUrl = new Map(current.map((listing) => [listing.url.toLowerCase(), listing]));
+        for (const listing of listings) byUrl.set(listing.url.toLowerCase(), listing);
+        return [...byUrl.values()];
+      });
+      const loaded = statuses.filter((status) => status.status === "loaded").length;
+      setMessage(`Loaded ${loaded} of ${statuses.length} selected company boards. Search results are filtered locally.`);
+    } finally {
+      setLoadingFeeds(false);
+    }
+  }
+
+  async function retryDirectoryLoad() {
+    setDirectoryError("");
+    try {
+      setDirectoryBoards(await loadJobBoardDirectory());
+    } catch (error) {
+      setDirectoryError(error instanceof Error ? error.message : "The company directory could not be loaded.");
+    }
+  }
+
   async function showListingDetails(listing: JobListing) {
     setLoadingListingId(listing.id);
     try {
@@ -241,10 +316,6 @@ function App() {
   }
 
   function saveFeedListing(listing: JobListing) {
-    if (!listing.description) {
-      setMessage("Load the job details before saving this listing.");
-      return;
-    }
     if (!safeExternalUrl(listing.url)) {
       setMessage("This job source returned an invalid application link.");
       return;
@@ -278,7 +349,9 @@ function App() {
     setData((current) => ({ ...current, jobs: [job, ...current.jobs] }));
     setSelectedId(job.id);
     setView("jobs");
-    setMessage("Job saved in your application tracker. Review the official listing and apply yourself.");
+    setMessage(listing.description
+      ? "Job saved in your application tracker. Review the official listing and apply yourself."
+      : "Job saved without a job description. Open the official listing and add description details if you want to draft a cover letter.");
   }
 
   async function importExtractedJobs(file?: File) {
@@ -448,6 +521,50 @@ function App() {
               <p className="search-filter-note">Salary ranges must overlap your selected range. Only disclosed USD salaries can be compared; jobs without a salary are listed separately when included.</p>
             </div>
             <p className="feed-company-names">Integrated feeds: {supportedCompanyFeeds.map((source) => source.company).join(", ")}.</p>
+            <div className="directory-panel">
+              <div className="directory-heading">
+                <div><h2>Search the employer directory</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} public company boards in your local directory.` : directoryError || "Loading the local employer directory…"}</p></div>
+                <button className="button button-outline" onClick={searchSelectedBoards} disabled={loadingFeeds || selectedDirectoryKeys.length === 0}>
+                  {loadingFeeds ? "Searching…" : `Search selected (${selectedDirectoryKeys.length}/10)`}
+                </button>
+              </div>
+              <div className="directory-controls">
+                <label>Company, board platform, or region
+                  <input type="search" value={directoryQuery} onChange={(event) => setDirectoryQuery(event.target.value)} placeholder="e.g. NVIDIA, Stripe, healthcare" />
+                </label>
+                <label>Platform
+                  <select value={directoryPlatform} onChange={(event) => setDirectoryPlatform(event.target.value as DirectoryPlatform | "all")}>
+                    <option value="all">All platforms</option>
+                    <option value="ashby">Ashby</option><option value="greenhouse">Greenhouse</option>
+                    <option value="lever">Lever</option><option value="personio">Personio</option>
+                    <option value="recruitee">Recruitee</option><option value="rippling">Rippling</option>
+                    <option value="workable">Workable</option><option value="workday">Workday</option>
+                  </select>
+                </label>
+              </div>
+              {directoryError && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
+              {!directoryQuery.trim() ? <p className="directory-help">Enter a company name or choose a platform to find boards. Select up to 10, then search only those employers.</p> : directoryMatches.length ? (
+                <div className="directory-results">
+                  {directoryMatches.map((board) => {
+                    const key = `${board.platform}:${board.token}`;
+                    const workday = board.platform === "workday";
+                    return <div className="directory-result" key={key}>
+                      <label className="directory-select">
+                        <input type="checkbox" checked={selectedDirectoryKeys.includes(key)} disabled={workday} onChange={() => toggleDirectoryBoard(board)} />
+                        <span><strong>{board.company}</strong><small>{board.platform} · {board.open_roles.toLocaleString()} listed roles{board.region ? ` · ${board.region}` : ""}</small></span>
+                      </label>
+                      <a href={board.board_url} target="_blank" rel="noreferrer">Open board ↗</a>
+                      {workday && <small className="directory-limit-note">Direct requests are blocked by Workday’s browser CORS policy</small>}
+                    </div>;
+                  })}
+                </div>
+              ) : <p className="directory-help">No board matched that search. Try another company name or platform.</p>}
+              {directoryStatuses.length > 0 && <div className="feed-status-list" aria-label="Selected directory board status">{directoryStatuses.map((status) =>
+                <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>
+                  {status.company}: {status.status === "loaded" ? `${status.count} listings` : status.error}
+                </span>,
+              )}</div>}
+            </div>
             {feedStatuses.length > 0 && <div className="feed-status-list" aria-label="Company feed status">{feedStatuses.map((status) =>
               <span className={status.status === "loaded" ? "feed-status loaded" : "feed-status failed"} key={status.company}>
                 {status.company}: {status.status === "loaded" ? `${status.count} listings` : status.error}
@@ -555,8 +672,8 @@ function FeedJobCard({ listing, loading, onLoadDetails, onSave }: {
     {listing.description && <p className="feed-description">{listing.description.slice(0, 220)}{listing.description.length > 220 ? "…" : ""}</p>}
     <div className="feed-job-actions">
       {officialUrl && <a className="button button-outline small-button" href={officialUrl} target="_blank" rel="noreferrer">Official listing ↗</a>}
-      {!listing.description && <button className="button button-outline small-button" onClick={onLoadDetails} disabled={loading}>{loading ? "Loading…" : "Load details + salary"}</button>}
-      <button className="button button-dark small-button" onClick={onSave} disabled={!listing.description}>Save to applications</button>
+      {!listing.description && listing.provider === "greenhouse" && <button className="button button-outline small-button" onClick={onLoadDetails} disabled={loading}>{loading ? "Loading…" : "Load details + salary"}</button>}
+      <button className="button button-dark small-button" onClick={onSave}>Save to applications</button>
     </div>
   </article>;
 }

@@ -14,7 +14,9 @@ export interface JobListing {
   description: string;
   salary: SalaryRange | null;
   publishedAt: string;
-  provider: "greenhouse" | "ashby" | "remoteok" | "remotive" | "arbeitnow" | "jobicy" | "weworkremotely";
+  provider:
+    | "greenhouse" | "ashby" | "remoteok" | "remotive" | "arbeitnow" | "jobicy" | "weworkremotely"
+    | "lever" | "personio" | "recruitee" | "rippling" | "workable" | "workday";
   board: string;
   sourceUrl?: string;
 }
