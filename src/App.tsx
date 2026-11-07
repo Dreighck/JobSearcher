@@ -38,7 +38,6 @@ const defaultSearchFilters: JobSearchFilters = {
   minimumSalary: 140000,
   maximumSalary: null,
   includeUndisclosedSalary: true,
-  engineeringRolesOnly: true,
 };
 
 function makeId(): string {
@@ -444,7 +443,6 @@ function App() {
                 <label>Work arrangement<select value={searchFilters.workArrangement} onChange={(event) => updateSearchFilters({ workArrangement: event.target.value as JobSearchFilters["workArrangement"] })}><option value="any">Any arrangement</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">On-site</option></select></label>
                 <label>Minimum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.minimumSalary ?? ""} placeholder="No minimum" onChange={(event) => updateSearchFilters({ minimumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
                 <label>Maximum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.maximumSalary ?? ""} placeholder="No maximum" onChange={(event) => updateSearchFilters({ maximumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
-                <label className="search-checkbox"><input type="checkbox" checked={searchFilters.engineeringRolesOnly} onChange={(event) => updateSearchFilters({ engineeringRolesOnly: event.target.checked })} /> Engineering and software roles only</label>
                 <label className="search-checkbox"><input type="checkbox" checked={searchFilters.includeUndisclosedSalary} onChange={(event) => updateSearchFilters({ includeUndisclosedSalary: event.target.checked })} /> Include jobs with undisclosed salary</label>
               </div>
               <p className="search-filter-note">Salary ranges must overlap your selected range. Only disclosed USD salaries can be compared; jobs without a salary are listed separately when included.</p>

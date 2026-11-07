@@ -35,7 +35,6 @@ export interface JobSearchFilters {
   minimumSalary: number | null;
   maximumSalary: number | null;
   includeUndisclosedSalary: boolean;
-  engineeringRolesOnly: boolean;
 }
 
 export const supportedCompanyFeeds = [
@@ -334,7 +333,6 @@ export function salaryUndisclosed(job: JobListing): boolean {
 }
 
 export function matchesJobSearch(job: JobListing, filters: JobSearchFilters): boolean {
-  if (filters.engineeringRolesOnly && !isTargetRole(job)) return false;
 
   if (filters.locationMode === "preferred" && !isTargetLocation(job)) return false;
   if (filters.locationMode === "custom" &&

@@ -39,7 +39,7 @@ const defaultFilters: JobSearchFilters = {
   minimumSalary: 140000,
   maximumSalary: null,
   includeUndisclosedSalary: true,
-  engineeringRolesOnly: true,
+
 };
 
 describe("authorized job feed filters", () => {
@@ -143,19 +143,16 @@ describe("authorized job feed filters", () => {
     expect(matchesJobSearch(executive, {
       ...defaultFilters,
       locationMode: "anywhere",
-      engineeringRolesOnly: false,
     })).toBe(true);
     expect(matchesJobSearch(executive, {
       ...defaultFilters,
       locationMode: "anywhere",
-      engineeringRolesOnly: false,
       includeUndisclosedSalary: false,
     })).toBe(false);
     expect(matchesJobSearch(executive, {
       ...defaultFilters,
       locationMode: "custom",
       location: "Boston",
-      engineeringRolesOnly: false,
     })).toBe(false);
   });
 });
