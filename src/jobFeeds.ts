@@ -1,3 +1,5 @@
+import type { JobLevel } from "./types";
+
 export interface SalaryRange {
   min: number;
   max: number | null;
@@ -34,9 +36,88 @@ export interface JobSearchFilters {
   location: string;
   locationMode: "preferred" | "anywhere" | "custom";
   workArrangement: "any" | "remote" | "hybrid" | "onsite";
+  datePosted: "any" | "24h" | "7d" | "30d";
   minimumSalary: number | null;
   maximumSalary: number | null;
   includeUndisclosedSalary: boolean;
+}
+
+export type JobListingSort =
+  | "relevance"
+  | "newest"
+  | "salary-high"
+  | "salary-low"
+  | "company";
+
+export type JobPostedDateRange = JobSearchFilters["datePosted"];
+
+export function composeJobSearchKeyword(level: JobLevel, customLevel: string, keyword: string): string {
+  const prefix = level === "custom" ? customLevel.trim() : level;
+  return [prefix, keyword.trim()].filter(Boolean).join(" ");
+}
+
+function listingRelevance(job: JobListing, keywords: string): number {
+  const terms = keywords.split(",").map((term) => term.trim().toLowerCase()).filter(Boolean);
+  if (!terms.length) return 0;
+  const title = job.title.toLowerCase();
+  const company = job.company.toLowerCase();
+  const description = job.description.toLowerCase();
+  const location = job.location.toLowerCase();
+  const source = job.source.toLowerCase();
+  return terms.reduce((score, term) =>
+    score +
+    (title.includes(term) ? 8 : 0) +
+    (company.includes(term) ? 4 : 0) +
+    (description.includes(term) ? 1 : 0) +
+    (location.includes(term) ? 1 : 0) +
+    (source.includes(term) ? 1 : 0), 0);
+}
+
+function publishedTimestamp(value: string): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+export function sortJobListings(
+  listings: JobListing[],
+  sort: JobListingSort,
+  keywords: string,
+): JobListing[] {
+  return [...listings].sort((left, right) => {
+    if (sort === "relevance") {
+      const scoreDifference = listingRelevance(right, keywords) - listingRelevance(left, keywords);
+      if (scoreDifference) return scoreDifference;
+    } else if (sort === "newest") {
+      const leftDate = publishedTimestamp(left.publishedAt);
+      const rightDate = publishedTimestamp(right.publishedAt);
+      if (leftDate !== rightDate) {
+        if (leftDate === null) return 1;
+        if (rightDate === null) return -1;
+        return rightDate - leftDate;
+      }
+    } else if (sort === "salary-high" || sort === "salary-low") {
+      const leftSalary = left.salary?.min ?? null;
+      const rightSalary = right.salary?.min ?? null;
+      if (leftSalary !== rightSalary) {
+        if (leftSalary === null) return 1;
+        if (rightSalary === null) return -1;
+        return sort === "salary-high" ? rightSalary - leftSalary : leftSalary - rightSalary;
+      }
+    } else {
+      const companyOrder = left.company.localeCompare(right.company);
+      if (companyOrder) return companyOrder;
+    }
+
+    const leftDate = publishedTimestamp(left.publishedAt);
+    const rightDate = publishedTimestamp(right.publishedAt);
+    if (leftDate !== rightDate) {
+      if (leftDate === null) return 1;
+      if (rightDate === null) return -1;
+      return rightDate - leftDate;
+    }
+    return left.company.localeCompare(right.company) || left.title.localeCompare(right.title);
+  });
 }
 
 export const supportedCompanyFeeds = [
@@ -326,7 +407,7 @@ export function salaryUndisclosed(job: JobListing): boolean {
   return !job.salary;
 }
 
-export function matchesJobSearch(job: JobListing, filters: JobSearchFilters): boolean {
+export function matchesJobSearch(job: JobListing, filters: JobSearchFilters, now = Date.now()): boolean {
 
   if (filters.locationMode === "preferred" && !isTargetLocation(job)) return false;
   if (filters.locationMode === "custom" &&
@@ -352,6 +433,17 @@ export function matchesJobSearch(job: JobListing, filters: JobSearchFilters): bo
     if (filters.workArrangement === "remote" && !isRemote) return false;
     if (filters.workArrangement === "hybrid" && !isHybrid) return false;
     if (filters.workArrangement === "onsite" && !isOnsite) return false;
+  }
+
+  if (filters.datePosted !== "any") {
+    const postedAt = publishedTimestamp(job.publishedAt);
+    if (postedAt === null) return false;
+    const rangeMs = filters.datePosted === "24h"
+      ? 24 * 60 * 60 * 1000
+      : filters.datePosted === "7d"
+        ? 7 * 24 * 60 * 60 * 1000
+        : 30 * 24 * 60 * 60 * 1000;
+    if (postedAt < now - rangeMs || postedAt > now) return false;
   }
 
   if (!job.salary) return filters.includeUndisclosedSalary;

@@ -25,6 +25,8 @@ export async function loadData(): Promise<LocalData> {
         ...defaultData,
         ...saved,
         profile: { ...emptyProfile, ...saved.profile },
+        searchDefaults: saved.searchDefaults ?? {},
+        savedSearches: saved.savedSearches ?? [],
       } : defaultData);
       db.close();
     };

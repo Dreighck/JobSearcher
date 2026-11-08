@@ -1,3 +1,5 @@
+import type { JobKeywordPresetId } from "./directoryJobBoards";
+
 export type ApplicationStatus =
   | "Saved"
   | "Preparing"
@@ -43,10 +45,43 @@ export interface Job {
   updatedAt: string;
 }
 
+export type JobLevel = "" | "Junior" | "Senior" | "Principal" | "custom";
+
+export interface SearchDefault {
+  keyword: string;
+  companyBoardKeys?: string[];
+  jobLevel: JobLevel;
+  customJobLevel: string;
+}
+
+export interface SavedJobSearch {
+  id: string;
+  name: string;
+  presetId: JobKeywordPresetId | "custom";
+  keyword: string;
+  jobLevel: JobLevel;
+  customJobLevel: string;
+  filters: {
+    company: string;
+    location: string;
+    locationMode: "preferred" | "anywhere" | "custom";
+    workArrangement: "any" | "remote" | "hybrid" | "onsite";
+    datePosted: "any" | "24h" | "7d" | "30d";
+    minimumSalary: number | null;
+    maximumSalary: number | null;
+    includeUndisclosedSalary: boolean;
+  };
+  sort: "relevance" | "newest" | "salary-high" | "salary-low" | "company";
+  companyBoardKeys: string[];
+  createdAt: string;
+}
+
 export interface LocalData {
   profile: Profile;
   jobs: Job[];
   profileReady: boolean;
+  searchDefaults: Record<string, SearchDefault>;
+  savedSearches: SavedJobSearch[];
 }
 
 export const emptyProfile: Profile = {
@@ -63,4 +98,6 @@ export const defaultData: LocalData = {
   profile: emptyProfile,
   jobs: [],
   profileReady: false,
+  searchDefaults: {},
+  savedSearches: [],
 };

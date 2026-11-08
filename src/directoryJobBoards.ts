@@ -33,6 +33,8 @@ export const jobKeywordPresets = [
   { keyword: "Project Manager", id: "project-manager" },
 ] as const;
 
+export type JobKeywordPresetId = (typeof jobKeywordPresets)[number]["id"];
+
 const keywordPresetCompanies: Record<(typeof jobKeywordPresets)[number]["id"], string[]> = {
   software: [
     "Microsoft", "Amazon", "Google", "Apple", "Meta", "NVIDIA", "Salesforce", "Adobe", "Oracle", "IBM",

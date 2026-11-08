@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  composeJobSearchKeyword,
   confirmedSalaryAtLeast,
   isTargetLocation,
   isTargetRole,
@@ -7,6 +8,7 @@ import {
   salaryFromAshbyCompensation,
   salaryFromPayInputRanges,
   salaryUndisclosed,
+  sortJobListings,
   fetchCompanyFeeds,
   matchesJobSearch,
   type JobListing,
@@ -36,6 +38,7 @@ const defaultFilters: JobSearchFilters = {
   location: "",
   locationMode: "preferred",
   workArrangement: "any",
+  datePosted: "any",
   minimumSalary: 140000,
   maximumSalary: null,
   includeUndisclosedSalary: true,
@@ -43,6 +46,32 @@ const defaultFilters: JobSearchFilters = {
 };
 
 describe("authorized job feed filters", () => {
+  it("sorts jobs by weighted keyword relevance, published date, salary, and company", () => {
+    const jobs = [
+      listing({ id: "body", title: "Engineer", company: "Zeta", description: "Software Engineer role", publishedAt: "2026-03-01", salary: { min: 150000, max: 170000, currency: "USD" } }),
+      listing({ id: "title", title: "Software Engineer", company: "Beta", publishedAt: "2026-01-01", salary: { min: 120000, max: 140000, currency: "USD" } }),
+      listing({ id: "newest", title: "Engineer", company: "Alpha", publishedAt: "2026-05-01", salary: null }),
+    ];
+
+    expect(sortJobListings(jobs, "relevance", "Software Engineer").map((job) => job.id))
+      .toEqual(["title", "body", "newest"]);
+    expect(sortJobListings(jobs, "newest", "").map((job) => job.id))
+      .toEqual(["newest", "body", "title"]);
+    expect(sortJobListings(jobs, "salary-high", "").map((job) => job.id))
+      .toEqual(["body", "title", "newest"]);
+    expect(sortJobListings(jobs, "salary-low", "").map((job) => job.id))
+      .toEqual(["title", "body", "newest"]);
+    expect(sortJobListings(jobs, "company", "").map((job) => job.company))
+      .toEqual(["Alpha", "Beta", "Zeta"]);
+  });
+
+  it("composes job-level prefixes with the selected base keyword", () => {
+    expect(composeJobSearchKeyword("Junior", "", "Software Engineer")).toBe("Junior Software Engineer");
+    expect(composeJobSearchKeyword("custom", " Staff ", " Software Engineer ")).toBe("Staff Software Engineer");
+    expect(composeJobSearchKeyword("", "", "Software Engineer")).toBe("Software Engineer");
+    expect(composeJobSearchKeyword("Senior", "", "")).toBe("Senior");
+  });
+
   it("extracts a disclosed USD salary range from job text", () => {
     expect(salaryFromDescription("The annual salary range is $142,000–$180,000 USD."))
       .toEqual({ min: 142000, max: 180000, currency: "USD" });
@@ -131,7 +160,37 @@ describe("authorized job feed filters", () => {
     expect(matchesJobSearch(job, { ...defaultFilters, keywords: "designer, python" })).toBe(false);
     expect(matchesJobSearch(job, { ...defaultFilters, company: "other company" })).toBe(false);
     expect(matchesJobSearch(job, { ...defaultFilters, workArrangement: "hybrid" })).toBe(false);
+    expect(matchesJobSearch(job, { ...defaultFilters, workArrangement: "remote" })).toBe(true);
+    expect(matchesJobSearch(listing({ location: "New York, NY" }), {
+      ...defaultFilters,
+      locationMode: "anywhere",
+      workArrangement: "onsite",
+    })).toBe(false);
+    expect(matchesJobSearch(listing({ location: "On-site: New York, NY" }), {
+      ...defaultFilters,
+      locationMode: "anywhere",
+      workArrangement: "onsite",
+    })).toBe(true);
     expect(matchesJobSearch(job, { ...defaultFilters, minimumSalary: 195000 })).toBe(false);
+  });
+
+  it("filters by rolling posting date ranges and omits unknown or future dates", () => {
+    const now = Date.parse("2026-11-07T12:00:00Z");
+    const withinDay = listing({ publishedAt: "2026-11-07T00:00:00Z" });
+    const olderThanDay = listing({ publishedAt: "2026-11-06T00:00:00Z" });
+    const olderThanWeek = listing({ publishedAt: "2026-10-30T00:00:00Z" });
+
+    expect(matchesJobSearch(withinDay, { ...defaultFilters, locationMode: "anywhere", datePosted: "24h" }, now)).toBe(true);
+    expect(matchesJobSearch(olderThanDay, { ...defaultFilters, locationMode: "anywhere", datePosted: "24h" }, now)).toBe(false);
+    expect(matchesJobSearch(olderThanWeek, { ...defaultFilters, locationMode: "anywhere", datePosted: "7d" }, now)).toBe(false);
+    expect(matchesJobSearch(olderThanWeek, { ...defaultFilters, locationMode: "anywhere", datePosted: "30d" }, now)).toBe(true);
+    expect(matchesJobSearch(listing({ publishedAt: "" }), { ...defaultFilters, locationMode: "anywhere", datePosted: "7d" }, now)).toBe(false);
+    expect(matchesJobSearch(listing({ publishedAt: "2026-11-08T00:00:00Z" }), {
+      ...defaultFilters,
+      locationMode: "anywhere",
+      datePosted: "30d",
+    }, now)).toBe(false);
+    expect(matchesJobSearch(listing({ publishedAt: "" }), { ...defaultFilters, locationMode: "anywhere" }, now)).toBe(true);
   });
 
   it("allows location and role scope changes and explicitly controls undisclosed salary results", () => {

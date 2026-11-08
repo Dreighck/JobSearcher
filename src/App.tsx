@@ -9,6 +9,7 @@ import {
   fetchSelectedDirectoryBoards,
   directoryBoardsForKeywordPreset,
   jobKeywordPresets,
+  type JobKeywordPresetId,
   loadJobBoardDirectory,
   loadWorkdayJobBoardDirectory,
   searchDirectory,
@@ -18,13 +19,16 @@ import {
 } from "./directoryJobBoards";
 import {
   fetchCompanyFeeds,
+  composeJobSearchKeyword,
   loadListingDetails,
   matchesJobSearch,
   manualOnlyCompanies,
   salaryUndisclosed,
+  sortJobListings,
   supportedCompanyFeeds,
   type FeedStatus,
   type JobListing,
+  type JobListingSort,
   type JobSearchFilters,
 } from "./jobFeeds";
 import { getMatch } from "./matching";
@@ -33,13 +37,24 @@ import {
   defaultData,
   type ApplicationStatus,
   type Job,
+  type JobLevel,
   type LocalData,
   type Profile,
+  type SavedJobSearch,
+  type SearchDefault,
 } from "./types";
 
 type View = "overview" | "discover" | "jobs" | "profile";
 const statuses: ApplicationStatus[] = ["Saved", "Preparing", "Applied", "Interviewing", "Offer", "Closed"];
 const FEED_RESULTS_PAGE_SIZE = 20;
+
+function directoryBoardKey(board: DirectoryBoard): string {
+  return `${board.platform}:${board.token}`;
+}
+
+function isJobLevel(value: string): value is JobLevel {
+  return value === "" || value === "Junior" || value === "Senior" || value === "Principal" || value === "custom";
+}
 
 const defaultSearchFilters: JobSearchFilters = {
   keywords: "",
@@ -47,6 +62,7 @@ const defaultSearchFilters: JobSearchFilters = {
   location: "",
   locationMode: "preferred",
   workArrangement: "any",
+  datePosted: "any",
   minimumSalary: 140000,
   maximumSalary: null,
   includeUndisclosedSalary: true,
@@ -102,6 +118,12 @@ function App() {
   const [loadingFeeds, setLoadingFeeds] = useState(false);
   const [loadingListingId, setLoadingListingId] = useState<string | null>(null);
   const [searchFilters, setSearchFilters] = useState<JobSearchFilters>(defaultSearchFilters);
+  const [jobListingSort, setJobListingSort] = useState<JobListingSort>("relevance");
+  const [savedSearchName, setSavedSearchName] = useState("");
+  const [selectedSavedSearchId, setSelectedSavedSearchId] = useState("");
+  const [baseKeyword, setBaseKeyword] = useState("");
+  const [jobLevel, setJobLevel] = useState<JobLevel>("");
+  const [customJobLevel, setCustomJobLevel] = useState("");
   const [salaryQualifiedPage, setSalaryQualifiedPage] = useState(1);
   const [salaryUnknownPage, setSalaryUnknownPage] = useState(1);
   const [directoryBoards, setDirectoryBoards] = useState<DirectoryBoard[]>([]);
@@ -112,7 +134,7 @@ function App() {
   const [directoryQuery, setDirectoryQuery] = useState("");
   const [workdayQuery, setWorkdayQuery] = useState("");
   const [directoryTab, setDirectoryTab] = useState<"searchable" | "workday">("searchable");
-  const [keywordPreset, setKeywordPreset] = useState<(typeof jobKeywordPresets)[number]["id"] | "custom">("custom");
+  const [keywordPreset, setKeywordPreset] = useState<JobKeywordPresetId | "custom">("custom");
   const [directoryPlatform, setDirectoryPlatform] = useState<DirectoryPlatform | "all">("all");
   const [selectedDirectoryKeys, setSelectedDirectoryKeys] = useState<string[]>([]);
   const [directoryVisibleCount, setDirectoryVisibleCount] = useState(40);
@@ -142,7 +164,7 @@ function App() {
   useEffect(() => {
     setSalaryQualifiedPage(1);
     setSalaryUnknownPage(1);
-  }, [feedListings, searchFilters]);
+  }, [feedListings, jobListingSort, searchFilters]);
 
   useEffect(() => {
     if (view !== "discover" || directoryLoadStarted.current) return;
@@ -157,14 +179,23 @@ function App() {
   }, [view]);
 
   useEffect(() => {
-    if (!directoryBoards.length) return;
+    if (!ready || !directoryBoards.length) return;
+    const savedDefault = data.searchDefaults[keywordPreset];
+    const preset = jobKeywordPresets.find((item) => item.id === keywordPreset);
     const defaults = keywordPreset === "custom"
       ? topDirectoryBoards(directoryBoards, 30)
       : directoryBoardsForKeywordPreset(directoryBoards, keywordPreset, 30);
-    setSelectedDirectoryKeys(defaults.map((board) => `${board.platform}:${board.token}`));
+    const defaultKeyword = savedDefault?.keyword ?? preset?.keyword ?? "";
+    const defaultLevel = savedDefault?.jobLevel ?? "";
+    const defaultCustomLevel = savedDefault?.customJobLevel ?? "";
+    setBaseKeyword(defaultKeyword);
+    setJobLevel(defaultLevel);
+    setCustomJobLevel(defaultCustomLevel);
+    updateSearchFilters({ keywords: composeJobSearchKeyword(defaultLevel, defaultCustomLevel, defaultKeyword) });
+    setSelectedDirectoryKeys(savedDefault?.companyBoardKeys ?? defaults.map(directoryBoardKey));
     setProcessedDirectoryKeys([]);
     setDirectoryStatuses([]);
-  }, [directoryBoards, keywordPreset]);
+  }, [data.searchDefaults, directoryBoards, ready, keywordPreset]);
 
   useEffect(() => {
     if (view !== "discover" || directoryTab !== "workday" || workdayDirectoryLoadStarted.current) return;
@@ -195,7 +226,14 @@ function App() {
     interviewing: data.jobs.filter((job) => job.status === "Interviewing").length,
     offers: data.jobs.filter((job) => job.status === "Offer").length,
   };
-  const filteredListings = feedListings.filter((listing) => matchesJobSearch(listing, searchFilters));
+  const filteredListings = useMemo(
+    () => sortJobListings(
+      feedListings.filter((listing) => matchesJobSearch(listing, searchFilters)),
+      jobListingSort,
+      searchFilters.keywords,
+    ),
+    [feedListings, jobListingSort, searchFilters],
+  );
   const salaryQualifiedListings = filteredListings.filter((listing) => !salaryUndisclosed(listing));
   const salaryUnknownListings = filteredListings.filter(salaryUndisclosed);
   const visibleSalaryQualifiedListings = salaryQualifiedListings.slice(
@@ -228,21 +266,126 @@ function App() {
     setSearchFilters((current) => ({ ...current, ...changes }));
   }
 
+  function persistActiveSearchDefault(changes: Partial<SearchDefault>) {
+    setData((current) => {
+      const preset = jobKeywordPresets.find((item) => item.id === keywordPreset);
+      const existing = current.searchDefaults[keywordPreset] ?? {
+        keyword: preset?.keyword ?? baseKeyword,
+        jobLevel,
+        customJobLevel,
+        ...(directoryBoards.length ? { companyBoardKeys: selectedDirectoryKeys } : {}),
+      };
+      return {
+        ...current,
+        searchDefaults: {
+          ...current.searchDefaults,
+          [keywordPreset]: { ...existing, ...changes },
+        },
+      };
+    });
+  }
+
   function applyKeywordPreset(value: string) {
     if (value === "custom") {
       setKeywordPreset("custom");
-      updateSearchFilters({ keywords: "" });
       return;
     }
     const preset = jobKeywordPresets.find((item) => item.id === value);
-    if (!preset) return;
-    setKeywordPreset(preset.id);
-    updateSearchFilters({ keywords: preset.keyword });
+    if (preset) setKeywordPreset(preset.id);
   }
 
-  function updateKeywordQuery(keywords: string) {
-    if (keywordPreset !== "custom") setKeywordPreset("custom");
-    updateSearchFilters({ keywords });
+  function updateKeywordQuery(keyword: string) {
+    setBaseKeyword(keyword);
+    updateSearchFilters({ keywords: composeJobSearchKeyword(jobLevel, customJobLevel, keyword) });
+    persistActiveSearchDefault({ keyword });
+  }
+
+  function updateJobLevel(level: JobLevel) {
+    setJobLevel(level);
+    updateSearchFilters({ keywords: composeJobSearchKeyword(level, customJobLevel, baseKeyword) });
+    persistActiveSearchDefault({ jobLevel: level });
+  }
+
+  function updateCustomJobLevel(value: string) {
+    setCustomJobLevel(value);
+    updateSearchFilters({ keywords: composeJobSearchKeyword(jobLevel, value, baseKeyword) });
+    persistActiveSearchDefault({ customJobLevel: value });
+  }
+
+  function resetSearchFilters() {
+    setBaseKeyword("");
+    setJobLevel("");
+    setCustomJobLevel("");
+    setSearchFilters(defaultSearchFilters);
+  }
+
+  function saveCurrentSearch() {
+    const name = savedSearchName.trim();
+    if (!name) {
+      setMessage("Enter a name for this saved search.");
+      return;
+    }
+    const savedSearch: SavedJobSearch = {
+      id: makeId(),
+      name,
+      presetId: keywordPreset,
+      keyword: baseKeyword,
+      jobLevel,
+      customJobLevel,
+      filters: {
+        company: searchFilters.company,
+        location: searchFilters.location,
+        locationMode: searchFilters.locationMode,
+        workArrangement: searchFilters.workArrangement,
+        datePosted: searchFilters.datePosted,
+        minimumSalary: searchFilters.minimumSalary,
+        maximumSalary: searchFilters.maximumSalary,
+        includeUndisclosedSalary: searchFilters.includeUndisclosedSalary,
+      },
+      sort: jobListingSort,
+      companyBoardKeys: [...selectedDirectoryKeys],
+      createdAt: new Date().toISOString(),
+    };
+    setData((current) => ({ ...current, savedSearches: [savedSearch, ...current.savedSearches] }));
+    setSelectedSavedSearchId(savedSearch.id);
+    setSavedSearchName("");
+    setMessage(`Saved "${name}" on this device.`);
+  }
+
+  function applySavedSearch(search: SavedJobSearch) {
+    setKeywordPreset(search.presetId);
+    setBaseKeyword(search.keyword);
+    setJobLevel(search.jobLevel);
+    setCustomJobLevel(search.customJobLevel);
+    setSearchFilters({
+      ...defaultSearchFilters,
+      ...search.filters,
+      keywords: composeJobSearchKeyword(search.jobLevel, search.customJobLevel, search.keyword),
+    });
+    setJobListingSort(search.sort);
+    setSelectedDirectoryKeys(search.companyBoardKeys);
+    setProcessedDirectoryKeys([]);
+    setDirectoryStatuses([]);
+    setData((current) => ({
+      ...current,
+      searchDefaults: {
+        ...current.searchDefaults,
+        [search.presetId]: {
+          keyword: search.keyword,
+          jobLevel: search.jobLevel,
+          customJobLevel: search.customJobLevel,
+          companyBoardKeys: search.companyBoardKeys,
+        },
+      },
+    }));
+    setMessage(`Applied saved search "${search.name}".`);
+  }
+
+  function removeSavedSearch(id: string) {
+    const search = data.savedSearches.find((item) => item.id === id);
+    setData((current) => ({ ...current, savedSearches: current.savedSearches.filter((item) => item.id !== id) }));
+    if (selectedSavedSearchId === id) setSelectedSavedSearchId("");
+    if (search) setMessage(`Removed saved search "${search.name}".`);
   }
 
   function updateProfile(profile: Profile) {
@@ -344,18 +487,21 @@ function App() {
   }
 
   function toggleDirectoryBoard(board: DirectoryBoard) {
-    const key = `${board.platform}:${board.token}`;
+    const key = directoryBoardKey(board);
+    const nextSelection = selectedDirectoryKeys.includes(key)
+      ? selectedDirectoryKeys.filter((value) => value !== key)
+      : [...selectedDirectoryKeys, key];
     setProcessedDirectoryKeys((current) => current.filter((value) => value !== key));
-    setSelectedDirectoryKeys((current) => {
-      if (current.includes(key)) return current.filter((value) => value !== key);
-      return [...current, key];
-    });
+    setSelectedDirectoryKeys(nextSelection);
+    persistActiveSearchDefault({ companyBoardKeys: nextSelection });
   }
 
   function selectAllDirectoryMatches() {
-    setSelectedDirectoryKeys(directoryMatches.map((board) => `${board.platform}:${board.token}`));
+    const keys = directoryMatches.map(directoryBoardKey);
+    setSelectedDirectoryKeys(keys);
     setProcessedDirectoryKeys([]);
     setDirectoryStatuses([]);
+    persistActiveSearchDefault({ companyBoardKeys: keys });
     setMessage(`Selected all ${directoryMatches.length.toLocaleString()} matching directory boards. Fetch results manually in batches of up to 100.`);
   }
 
@@ -363,6 +509,7 @@ function App() {
     setSelectedDirectoryKeys([]);
     setProcessedDirectoryKeys([]);
     setDirectoryStatuses([]);
+    persistActiveSearchDefault({ companyBoardKeys: [] });
   }
 
   async function fetchNextDirectoryBatch() {
@@ -612,7 +759,7 @@ function App() {
           <section className="page narrow-page">
             <div className="eyebrow">ABOUT YOU</div><h1>Your <em>profile.</em></h1>
             <p className="page-subtitle">Import a DOCX resume for local extraction, then check every detail. Nothing is uploaded.</p>
-            <div className="privacy-inline"><span>◈</span><div><strong>Processed only in this browser</strong><p>The resume file itself is not saved. Only the profile details below are kept in local browser storage.</p></div></div>
+            <div className="privacy-inline"><span>◈</span><div><strong>Processed only in this browser</strong><p>The resume file itself is not saved. Your profile, saved applications, and customized search defaults are stored in this browser’s local IndexedDB.</p></div></div>
             <div className="import-card">
               <div className="import-symbol">↑</div><div><strong>{data.profileReady ? "Update from a resume" : "Import your resume"}</strong><p>Choose a .docx file. You can edit the extracted fields before using them.</p></div>
               <input ref={fileInput} className="hidden-input" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => importResume(event.target.files?.[0])} />
@@ -638,7 +785,7 @@ function App() {
             </div>
             <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads public job-board feeds from supported sources. Your resume and profile are not sent. Search filters are applied locally to the listings; you review and submit applications yourself.</p></div></div>
             <div className="form-card search-filter-card">
-              <div className="form-card-heading"><div><h2>Search filters</h2><p>Filters update results as you type. Separate keywords with commas to match any term.</p></div><button className="text-button" onClick={() => setSearchFilters(defaultSearchFilters)}>Reset filters</button></div>
+              <div className="form-card-heading"><div><h2>Search filters</h2><p>Filters update results as you type. Preset keywords and employer selections save locally in this browser.</p></div><button className="text-button" onClick={resetSearchFilters}>Reset filters</button></div>
               <div className="fields-grid">
                 <label>Keyword preset
                   <select value={keywordPreset} onChange={(event) => applyKeywordPreset(event.target.value)}>
@@ -646,16 +793,59 @@ function App() {
                     {jobKeywordPresets.map((preset) => <option value={preset.id} key={preset.id}>{preset.keyword}</option>)}
                   </select>
                 </label>
-                <label className="span-two">Keywords<input type="search" value={searchFilters.keywords} placeholder="e.g. backend, Python, staff engineer" onChange={(event) => updateKeywordQuery(event.target.value)} /></label>
+                <label>Job level
+                  <select value={jobLevel} onChange={(event) => { if (isJobLevel(event.target.value)) updateJobLevel(event.target.value); }}>
+                    <option value="">Any level</option>
+                    <option value="Junior">Junior</option>
+                    <option value="Senior">Senior</option>
+                    <option value="Principal">Principal</option>
+                    <option value="custom">Custom prefix</option>
+                  </select>
+                </label>
+                {jobLevel === "custom" && <label>Custom job-level prefix<input type="text" value={customJobLevel} placeholder="e.g. Staff" onChange={(event) => updateCustomJobLevel(event.target.value)} /></label>}
+                <label className="span-two">Base job keyword<input type="search" value={baseKeyword} placeholder="e.g. Software Engineer, backend" onChange={(event) => updateKeywordQuery(event.target.value)} /></label>
+                <p className="search-filter-note span-two">Search phrase: <strong>{searchFilters.keywords || "Any job title"}</strong>. Each preset’s keyword, job-level choice, and selected companies are saved on this device only.</p>
                 <label>Company or job board<input type="search" value={searchFilters.company} placeholder="Any company or source" onChange={(event) => updateSearchFilters({ company: event.target.value })} /></label>
                 <label>Location preference<select value={searchFilters.locationMode} onChange={(event) => updateSearchFilters({ locationMode: event.target.value as JobSearchFilters["locationMode"] })}><option value="preferred">Remote (not known international) or Louisiana</option><option value="anywhere">Anywhere</option><option value="custom">Specific location</option></select></label>
                 {searchFilters.locationMode === "custom" && <label>Location contains<input type="search" value={searchFilters.location} placeholder="e.g. Austin, Texas" onChange={(event) => updateSearchFilters({ location: event.target.value })} /></label>}
                 <label>Work arrangement<select value={searchFilters.workArrangement} onChange={(event) => updateSearchFilters({ workArrangement: event.target.value as JobSearchFilters["workArrangement"] })}><option value="any">Any arrangement</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">On-site</option></select></label>
+                <label>Date posted
+                  <select value={searchFilters.datePosted} onChange={(event) => updateSearchFilters({ datePosted: event.target.value as JobSearchFilters["datePosted"] })}>
+                    <option value="any">Any time</option>
+                    <option value="24h">Past 24 hours</option>
+                    <option value="7d">Past 7 days</option>
+                    <option value="30d">Past 30 days</option>
+                  </select>
+                </label>
                 <label>Minimum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.minimumSalary ?? ""} placeholder="No minimum" onChange={(event) => updateSearchFilters({ minimumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
                 <label>Maximum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.maximumSalary ?? ""} placeholder="No maximum" onChange={(event) => updateSearchFilters({ maximumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
                 <label className="search-checkbox"><input type="checkbox" checked={searchFilters.includeUndisclosedSalary} onChange={(event) => updateSearchFilters({ includeUndisclosedSalary: event.target.checked })} /> Include jobs with undisclosed salary</label>
               </div>
               <p className="search-filter-note">Salary ranges must overlap your selected range. Only disclosed USD salaries can be compared; jobs without a salary are listed separately when included.</p>
+            </div>
+            <div className="saved-search-panel">
+              <div className="saved-search-create">
+                <label>Save current search
+                  <input type="text" value={savedSearchName} onChange={(event) => setSavedSearchName(event.target.value)} placeholder="e.g. Senior remote software roles" />
+                </label>
+                <button className="button button-outline" onClick={saveCurrentSearch}>Save search</button>
+              </div>
+              {data.savedSearches.length > 0 && (
+                <div className="saved-search-load">
+                  <label>Saved searches
+                    <select value={selectedSavedSearchId} onChange={(event) => setSelectedSavedSearchId(event.target.value)}>
+                      <option value="">Choose a saved search</option>
+                      {data.savedSearches.map((search) => <option key={search.id} value={search.id}>{search.name}</option>)}
+                    </select>
+                  </label>
+                  <button className="button button-outline" disabled={!selectedSavedSearchId} onClick={() => {
+                    const search = data.savedSearches.find((item) => item.id === selectedSavedSearchId);
+                    if (search) applySavedSearch(search);
+                  }}>Load search</button>
+                  <button className="text-button" disabled={!selectedSavedSearchId} onClick={() => removeSavedSearch(selectedSavedSearchId)}>Delete</button>
+                </div>
+              )}
+              <p>Saved searches are private to this browser and include your filters and selected employer boards.</p>
             </div>
             <p className="feed-company-names">Integrated feeds: {supportedCompanyFeeds.map((source) => source.company).join(", ")}.</p>
             <div className="directory-panel">
@@ -678,7 +868,7 @@ function App() {
                   <details className="directory-dropdown">
                     <summary>Employer defaults and batch selection <span>{selectedDirectoryKeys.length.toLocaleString()} selected</span></summary>
                     <div className="directory-dropdown-panel">
-                  <p className="directory-help">Use the checkboxes to add or remove companies from the current defaults. These selections are also the companies used by Fetch next batch.</p>
+                  <p className="directory-help">Use the checkboxes to add or remove companies from this keyword preset. Changes are saved on this device and also determine which boards Fetch next batch uses.</p>
                   <div className="directory-controls">
                     <label>Search company, platform, or region
                       <input type="search" value={directoryQuery} onChange={(event) => { setDirectoryQuery(event.target.value); setDirectoryVisibleCount(40); }} placeholder="e.g. NVIDIA, Stripe, healthcare" />
@@ -775,7 +965,18 @@ function App() {
                 </details>
               )}
             </div>
-            <div className="section-heading"><div><h2>Jobs matching your filters</h2><p>{salaryQualifiedListings.length} jobs with disclosed USD salary in the selected range.</p></div></div>
+            <div className="section-heading feed-results-heading">
+              <div><h2>Jobs matching your filters</h2><p>{salaryQualifiedListings.length} jobs with disclosed USD salary in the selected range.</p></div>
+              <label>Sort by
+                <select value={jobListingSort} onChange={(event) => setJobListingSort(event.target.value as JobListingSort)}>
+                  <option value="relevance">Best match</option>
+                  <option value="newest">Newest</option>
+                  <option value="salary-high">Salary: high to low</option>
+                  <option value="salary-low">Salary: low to high</option>
+                  <option value="company">Company: A to Z</option>
+                </select>
+              </label>
+            </div>
             {salaryQualifiedListings.length ? (
               <>
               <div className="feed-job-list">{visibleSalaryQualifiedListings.map((listing) => (
