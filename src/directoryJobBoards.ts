@@ -214,6 +214,32 @@ export function searchDirectory(
   );
 }
 
+const searchableDirectoryPlatforms = new Set<string>([
+  "greenhouse", "ashby", "lever", "personio", "recruitee", "rippling", "workable",
+]);
+
+export function isSearchableDirectoryListing(listing: JobListing): boolean {
+  return searchableDirectoryPlatforms.has(listing.provider);
+}
+
+export function mergeSelectedDirectoryListings(
+  existing: JobListing[],
+  incoming: JobListing[],
+  selectedBoardKeys: string[],
+): JobListing[] {
+  const selected = new Set(selectedBoardKeys);
+  const merged = [
+    ...existing.filter((listing) =>
+      !isSearchableDirectoryListing(listing) ||
+      selected.has(`${listing.provider}:${listing.board}`),
+    ),
+    ...incoming,
+  ];
+  const byUrl = new Map<string, JobListing>();
+  for (const listing of merged) byUrl.set(listing.url.toLowerCase(), listing);
+  return [...byUrl.values()];
+}
+
 function makeListing(
   board: DirectoryBoard,
   id: string,

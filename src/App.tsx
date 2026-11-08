@@ -8,6 +8,8 @@ import { fetchPublicJobBoards } from "./publicJobBoards";
 import {
   fetchSelectedDirectoryBoards,
   directoryBoardsForKeywordPreset,
+  mergeSelectedDirectoryListings,
+  isSearchableDirectoryListing,
   jobKeywordPresets,
   type JobKeywordPresetId,
   loadJobBoardDirectory,
@@ -18,14 +20,11 @@ import {
   type DirectoryPlatform,
 } from "./directoryJobBoards";
 import {
-  fetchCompanyFeeds,
   composeJobSearchKeyword,
   loadListingDetails,
   matchesJobSearch,
-  manualOnlyCompanies,
   salaryUndisclosed,
   sortJobListings,
-  supportedCompanyFeeds,
   type FeedStatus,
   type JobListing,
   type JobListingSort,
@@ -127,6 +126,7 @@ function App() {
   const [salaryQualifiedPage, setSalaryQualifiedPage] = useState(1);
   const [salaryUnknownPage, setSalaryUnknownPage] = useState(1);
   const [directoryBoards, setDirectoryBoards] = useState<DirectoryBoard[]>([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
   const [workdayBoards, setWorkdayBoards] = useState<DirectoryBoard[]>([]);
   const [directoryError, setDirectoryError] = useState("");
   const [workdayDirectoryError, setWorkdayDirectoryError] = useState("");
@@ -169,13 +169,15 @@ function App() {
   useEffect(() => {
     if (view !== "discover" || directoryLoadStarted.current) return;
     directoryLoadStarted.current = true;
+    setDirectoryLoading(true);
     loadJobBoardDirectory()
       .then((boards) => {
         setDirectoryBoards(boards);
       })
       .catch((error: unknown) => setDirectoryError(
         error instanceof Error ? error.message : "The company directory could not be loaded.",
-      ));
+      ))
+      .finally(() => setDirectoryLoading(false));
   }, [view]);
 
   useEffect(() => {
@@ -192,7 +194,9 @@ function App() {
     setJobLevel(defaultLevel);
     setCustomJobLevel(defaultCustomLevel);
     updateSearchFilters({ keywords: composeJobSearchKeyword(defaultLevel, defaultCustomLevel, defaultKeyword) });
-    setSelectedDirectoryKeys(savedDefault?.companyBoardKeys ?? defaults.map(directoryBoardKey));
+    const selectedKeys = savedDefault?.companyBoardKeys ?? defaults.map(directoryBoardKey);
+    setSelectedDirectoryKeys(selectedKeys);
+    setFeedListings((current) => mergeSelectedDirectoryListings(current, [], selectedKeys));
     setProcessedDirectoryKeys([]);
     setDirectoryStatuses([]);
   }, [data.searchDefaults, directoryBoards, ready, keywordPreset]);
@@ -364,6 +368,7 @@ function App() {
     });
     setJobListingSort(search.sort);
     setSelectedDirectoryKeys(search.companyBoardKeys);
+    setFeedListings((current) => mergeSelectedDirectoryListings(current, [], search.companyBoardKeys));
     setProcessedDirectoryKeys([]);
     setDirectoryStatuses([]);
     setData((current) => ({
@@ -455,30 +460,40 @@ function App() {
   async function searchCompanyFeeds() {
     setLoadingFeeds(true);
     setMessage("");
+    const pendingBoards = directoryBoards.filter((board) =>
+      selectedDirectoryKeys.includes(directoryBoardKey(board)) &&
+      !processedDirectoryKeys.includes(directoryBoardKey(board)),
+    );
+    const directoryBatch = pendingBoards.slice(0, 100);
     try {
       const [
-        { listings: companyListings, statuses: companyStatuses },
         { listings: publicBoardListings, statuses: publicBoardStatuses },
-      ] = await Promise.all([fetchCompanyFeeds(), fetchPublicJobBoards()]);
-      const seen = new Set<string>();
-      const listings = [...companyListings, ...publicBoardListings].filter((listing) => {
-        const key = listing.url.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-      const statuses = [...companyStatuses, ...publicBoardStatuses];
-      setFeedListings((current) => {
-        const directoryProviders = new Set(["greenhouse", "ashby", "lever", "personio", "recruitee", "rippling", "workable", "workday"]);
-        const existingDirectoryListings = current.filter((listing) => directoryProviders.has(listing.provider));
-        const byUrl = new Map([...listings, ...existingDirectoryListings].map((listing) => [listing.url.toLowerCase(), listing]));
-        return [...byUrl.values()];
-      });
+        { listings: directoryListings, statuses: directoryBatchStatuses },
+      ] = await Promise.all([
+        fetchPublicJobBoards(),
+        fetchSelectedDirectoryBoards(directoryBatch),
+      ]);
+      const statuses = publicBoardStatuses;
+      if (directoryBatch.length) {
+        setDirectoryStatuses((current) => [...current, ...directoryBatchStatuses]);
+        setProcessedDirectoryKeys((current) => [
+          ...current,
+          ...directoryBatch.map(directoryBoardKey),
+        ]);
+        setBatchCooldown(10);
+      }
+      setFeedListings((current) =>
+        mergeSelectedDirectoryListings(current, [...publicBoardListings, ...directoryListings], selectedDirectoryKeys),
+      );
       const loaded = statuses.filter((status) => status.status === "loaded").length;
       const failed = statuses.length - loaded;
-      setMessage(failed
-        ? `Loaded ${loaded} of ${statuses.length} integrated feeds. Some feeds failed; see the listings below for available results.`
-        : `Loaded current postings from all ${loaded} integrated feeds. Fetch employer-directory boards separately in batches.`);
+      const loadedDirectory = directoryBatchStatuses.filter((status) => status.status === "loaded").length;
+      const failedDirectory = directoryBatchStatuses.length - loadedDirectory;
+      setMessage(
+        `Refreshed ${loaded} of ${statuses.length} public job feeds and loaded ${loadedDirectory} of ${directoryBatch.length} selected company boards.` +
+        (failed || failedDirectory ? " Some sources failed; review the available listings and batch results." : "") +
+        (pendingBoards.length > directoryBatch.length ? " Start the next directory batch manually after the pause." : ""),
+      );
     } catch (error) {
       setMessage(error instanceof Error ? `Company feeds could not be loaded: ${error.message}` : "Company feeds could not be loaded.");
     } finally {
@@ -493,6 +508,10 @@ function App() {
       : [...selectedDirectoryKeys, key];
     setProcessedDirectoryKeys((current) => current.filter((value) => value !== key));
     setSelectedDirectoryKeys(nextSelection);
+    setFeedListings((current) => current.filter((listing) =>
+      !isSearchableDirectoryListing(listing) ||
+      nextSelection.includes(`${listing.provider}:${listing.board}`),
+    ));
     persistActiveSearchDefault({ companyBoardKeys: nextSelection });
   }
 
@@ -535,11 +554,7 @@ function App() {
       const { listings, statuses } = await fetchSelectedDirectoryBoards(batch);
       setDirectoryStatuses((current) => [...current, ...statuses]);
       setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map((board) => `${board.platform}:${board.token}`), ...batch.map((board) => `${board.platform}:${board.token}`)]);
-      setFeedListings((current) => {
-        const byUrl = new Map(current.map((listing) => [listing.url.toLowerCase(), listing]));
-        for (const listing of listings) byUrl.set(listing.url.toLowerCase(), listing);
-        return [...byUrl.values()];
-      });
+      setFeedListings((current) => mergeSelectedDirectoryListings(current, listings, selectedDirectoryKeys));
       setBatchCooldown(10);
       setMessage(`Fetched a batch of ${batch.length} directory boards (${statuses.filter((status) => status.status === "loaded").length} succeeded). Skipped ${skippedBoards.length} Workday boards. ${Math.max(0, selected.length - batch.length - skippedBoards.length)} fetchable boards remain; start the next batch manually after the pause.`);
     } catch (error) {
@@ -563,12 +578,15 @@ function App() {
       return;
     }
     setDirectoryError("");
+    setDirectoryLoading(true);
     try {
       const boards = await loadJobBoardDirectory();
       setDirectoryBoards(boards);
       directoryLoadStarted.current = true;
     } catch (error) {
       setDirectoryError(error instanceof Error ? error.message : "The searchable company directory could not be loaded.");
+    } finally {
+      setDirectoryLoading(false);
     }
   }
 
@@ -781,9 +799,11 @@ function App() {
           <section className="page">
             <div className="welcome-row">
               <div><div className="eyebrow">PUBLIC JOB FEEDS</div><h1>Find your <em>next role.</em></h1><p className="page-subtitle">Search public employer and job-board listings, then tune the results to your preferences.</p></div>
-              <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds}>{loadingFeeds ? "Loading feeds…" : "Refresh integrated feeds"} <span>↻</span></button>
+              <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds || directoryLoading || batchCooldown > 0}>
+                {loadingFeeds ? "Loading feeds and companies…" : directoryLoading ? "Loading company directory…" : batchCooldown > 0 ? `Next company batch in ${batchCooldown}s` : "Refresh feeds + next company batch"} <span>↻</span>
+              </button>
             </div>
-            <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads public job-board feeds from supported sources. Your resume and profile are not sent. Search filters are applied locally to the listings; you review and submit applications yourself.</p></div></div>
+            <div className="privacy-inline"><span>◈</span><div><strong>Public job listings only</strong><p>Search loads public job-board feeds and the selected companies from the searchable directory. Your resume and profile are not sent. Search filters are applied locally; you review and submit applications yourself.</p></div></div>
             <div className="form-card search-filter-card">
               <div className="form-card-heading"><div><h2>Search filters</h2><p>Filters update results as you type. Preset keywords and employer selections save locally in this browser.</p></div><button className="text-button" onClick={resetSearchFilters}>Reset filters</button></div>
               <div className="fields-grid">
@@ -847,7 +867,7 @@ function App() {
               )}
               <p>Saved searches are private to this browser and include your filters and selected employer boards.</p>
             </div>
-            <p className="feed-company-names">Integrated feeds: {supportedCompanyFeeds.map((source) => source.company).join(", ")}.</p>
+            <p className="feed-company-names">{selectedDirectoryKeys.length.toLocaleString()} directory companies selected. Workday companies are browse-only; other selected directory companies load with refresh in manual batches.</p>
             <div className="directory-panel">
               <div className="directory-tabs" role="tablist" aria-label="Employer board directories">
                 <button role="tab" aria-selected={directoryTab === "searchable"} className={directoryTab === "searchable" ? "directory-tab active" : "directory-tab"} onClick={() => setDirectoryTab("searchable")}>
@@ -886,7 +906,7 @@ function App() {
                   {directoryError && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
                   {!directoryQuery.trim() && directoryBoards.length === 0 ? <p className="directory-help">Loading the employer directory…</p> : directoryMatches.length ? (
                     <>
-                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. “Select all” applies to every match, including entries not currently visible. Fetching is manual and limited to 100 boards per batch with a pause between batches.</p>
+                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. “Select all” applies to every match, including entries not currently visible. Refresh fetches the next selected batch of up to 100 boards; further batches are manual with a pause between them.</p>
                       <div className="directory-selection-actions">
                         <button className="text-button" onClick={selectAllDirectoryMatches}>Select all {directoryMatches.length.toLocaleString()} matches</button>
                         <button className="text-button" onClick={clearDirectorySelection} disabled={selectedDirectoryKeys.length === 0}>Clear selection</button>
@@ -1011,9 +1031,6 @@ function App() {
                 ) : <p className="empty-hint">No roles need salary verification right now.</p>}
               </details>
             )}
-            <details className="manual-company-list"><summary>Other companies (career links and manual import)</summary><p>These companies’ public feeds are not yet integrated. Open their official careers site and use Import alert text or Add a job; the app will not scrape these pages.</p>
-              <div>{manualOnlyCompanies.map((company) => <a href={company.url} target="_blank" rel="noreferrer" key={company.company}>{company.company} ↗</a>)}</div>
-            </details>
             <p className="footer-note">Feed availability and salary disclosures vary. No login, site scraping, automated form filling, or application submission occurs here.</p>
           </section>
         )}

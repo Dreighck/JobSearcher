@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   directoryBoardsForKeywordPreset,
   fetchSelectedDirectoryBoards,
+  mergeSelectedDirectoryListings,
   loadJobBoardDirectory,
   loadWorkdayJobBoardDirectory,
   searchDirectory,
@@ -9,6 +10,7 @@ import {
   type DirectoryBoard,
   type DirectoryPlatform,
 } from "./directoryJobBoards";
+import type { JobListing } from "./jobFeeds";
 
 function board(platform: DirectoryPlatform, company = "example", token = "example"): DirectoryBoard {
   const apiUrl: Record<DirectoryPlatform, string> = {
@@ -85,6 +87,39 @@ describe("job board directory", () => {
     expect(selected.slice(0, 2).map((entry) => entry.company)).toEqual(["Google", "Microsoft"]);
     expect(selected.every((entry) => entry.platform !== "workday")).toBe(true);
     expect(new Set(selected.map((entry) => entry.company.toLowerCase())).size).toBe(30);
+  });
+
+  it("keeps listings only for selected directory boards and deduplicates URLs", () => {
+    const listing = (provider: JobListing["provider"], boardName: string, url: string): JobListing => ({
+      id: `${provider}-${boardName}`,
+      source: boardName,
+      title: "Software Engineer",
+      company: boardName,
+      url,
+      location: "Remote: United States",
+      description: "",
+      salary: null,
+      publishedAt: "",
+      provider,
+      board: boardName,
+    });
+    const current = [
+      listing("greenhouse", "selected", "https://jobs.test/selected"),
+      listing("ashby", "removed", "https://jobs.test/removed"),
+      listing("remoteok", "Remote OK", "https://jobs.test/public"),
+    ];
+    const incoming = [
+      listing("greenhouse", "selected", "https://jobs.test/selected"),
+      listing("lever", "new", "https://jobs.test/new"),
+    ];
+
+    expect(mergeSelectedDirectoryListings(current, incoming, [
+      "greenhouse:selected", "lever:new",
+    ])).toEqual([
+      current[0],
+      current[2],
+      incoming[1],
+    ]);
   });
 
   it("only loads directory entries with HTTPS URLs on the declared provider hosts", async () => {

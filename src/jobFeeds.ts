@@ -120,71 +120,10 @@ export function sortJobListings(
   });
 }
 
-export const supportedCompanyFeeds = [
-  { company: "Stripe", url: "https://stripe.com/jobs", provider: "greenhouse", board: "stripe" },
-  { company: "GitLab", url: "https://about.gitlab.com/jobs/", provider: "greenhouse", board: "gitlab" },
-  { company: "Elastic", url: "https://jobs.elastic.co/", provider: "greenhouse", board: "elastic" },
-  { company: "Datadog", url: "https://careers.datadoghq.com/", provider: "greenhouse", board: "datadog" },
-  { company: "Cloudflare", url: "https://www.cloudflare.com/careers/jobs/", provider: "greenhouse", board: "cloudflare" },
-  { company: "MongoDB", url: "https://www.mongodb.com/company/careers", provider: "greenhouse", board: "mongodb" },
-  { company: "Render", url: "https://render.com/careers", provider: "ashby", board: "render" },
-  { company: "Linear", url: "https://linear.app/careers", provider: "ashby", board: "linear" },
-  { company: "Ramp", url: "https://ramp.com/careers", provider: "ashby", board: "ramp" },
-  { company: "OpenAI", url: "https://openai.com/careers/search/", provider: "ashby", board: "openai" },
-  { company: "Notion", url: "https://www.notion.com/careers", provider: "ashby", board: "notion" },
-  { company: "ElevenLabs", url: "https://elevenlabs.io/careers", provider: "ashby", board: "elevenlabs" },
-  { company: "PostHog", url: "https://posthog.com/careers", provider: "ashby", board: "posthog" },
-  { company: "Cursor", url: "https://cursor.com/careers", provider: "ashby", board: "cursor" },
-  { company: "Replit", url: "https://replit.com/careers", provider: "ashby", board: "replit" },
-  { company: "Perplexity", url: "https://www.perplexity.ai/careers", provider: "ashby", board: "perplexity" },
-  { company: "Modal", url: "https://modal.com/careers", provider: "ashby", board: "modal" },
-  { company: "Coinbase", url: "https://www.coinbase.com/careers", provider: "greenhouse", board: "coinbase" },
-  { company: "Figma", url: "https://www.figma.com/careers/", provider: "greenhouse", board: "figma" },
-  { company: "Discord", url: "https://discord.com/jobs", provider: "greenhouse", board: "discord" },
-  { company: "Duolingo", url: "https://careers.duolingo.com/", provider: "greenhouse", board: "duolingo" },
-  { company: "Reddit", url: "https://www.redditinc.com/careers", provider: "greenhouse", board: "reddit" },
-  { company: "Plaid", url: "https://plaid.com/careers/", provider: "lever", board: "plaid" },
-] as const;
-
-export const manualOnlyCompanies = [
-  { company: "Atlassian", url: "https://www.atlassian.com/company/careers" },
-  { company: "CrowdStrike", url: "https://www.crowdstrike.com/careers/" },
-  { company: "Confluent", url: "https://careers.confluent.io/" },
-  { company: "Automattic", url: "https://automattic.com/work-with-us/" },
-  { company: "Red Hat", url: "https://www.redhat.com/en/jobs" },
-  { company: "HubSpot", url: "https://www.hubspot.com/careers" },
-  { company: "NVIDIA", url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite" },
-  { company: "BOK Financial", url: "https://jobs.bokf.com/" },
-  { company: "Adobe", url: "https://careers.adobe.com/" },
-  { company: "Salesforce", url: "https://careers.salesforce.com/" },
-  { company: "Dell Technologies", url: "https://jobs.dell.com/" },
-  { company: "Mastercard", url: "https://careers.mastercard.com/" },
-  { company: "Target", url: "https://corporate.target.com/careers" },
-  { company: "T-Mobile", url: "https://www.t-mobile.com/careers" },
-  { company: "Visa", url: "https://corporate.visa.com/en/careers.html" },
-  { company: "Intuit", url: "https://careers.intuit.com/" },
-  { company: "Netflix", url: "https://jobs.netflix.com/" },
-  { company: "Pinterest", url: "https://www.pinterestcareers.com/" },
-] as const;
-
 interface GreenhouseMetadata {
   name?: string;
   value_type?: string;
   value?: unknown;
-}
-
-interface GreenhouseJob {
-  id: number;
-  title: string;
-  absolute_url: string;
-  location?: { name?: string };
-  metadata?: GreenhouseMetadata[] | null;
-  first_published?: string | null;
-  content?: string;
-}
-
-interface GreenhouseResponse {
-  jobs: GreenhouseJob[];
 }
 
 interface AshbyJob {
@@ -209,10 +148,6 @@ interface AshbyJob {
       }>;
     }>;
   };
-}
-
-interface AshbyResponse {
-  jobs: AshbyJob[];
 }
 
 interface GreenhousePayInputRange {
@@ -281,48 +216,6 @@ export function salaryFromPayInputRanges(value: unknown): SalaryRange | null {
   };
 }
 
-function mapGreenhouseJob(job: GreenhouseJob, board: string, company: string): JobListing {
-  return {
-    id: String(job.id),
-    source: company,
-    title: job.title,
-    company,
-    url: job.absolute_url,
-    location: job.location?.name ?? "",
-    description: job.content ? stripHtml(job.content) : "",
-    salary: salaryFromMetadata(job.metadata) ?? (job.content ? salaryFromDescription(stripHtml(job.content)) : null),
-    publishedAt: job.first_published ?? "",
-    provider: "greenhouse",
-    board,
-  };
-}
-
-function mapAshbyJob(job: AshbyJob, board: string, company: string): JobListing {
-  const description = job.descriptionPlain ?? (job.descriptionHtml ? stripHtml(job.descriptionHtml) : "");
-  const locations = [
-    job.location,
-    ...(job.secondaryLocations ?? []).map((location) =>
-      typeof location === "string" ? location : location.location ?? "",
-    ),
-  ].filter(Boolean).join("; ");
-  const salary = job.shouldDisplayCompensationOnJobPostings === false
-    ? null
-    : salaryFromAshbyCompensation(job.compensation);
-  return {
-    id: job.id,
-    source: company,
-    title: job.title,
-    company,
-    url: job.jobUrl,
-    location: job.isRemote ? `Remote: ${locations}` : locations,
-    description,
-    salary,
-    publishedAt: job.publishedAt ?? "",
-    provider: "ashby",
-    board,
-  };
-}
-
 export function salaryFromAshbyCompensation(
   compensation: AshbyJob["compensation"],
 ): SalaryRange | null {
@@ -340,51 +233,6 @@ export function salaryFromAshbyCompensation(
     min: Math.min(...ranges.map((range) => range.min)),
     max: Math.max(...ranges.map((range) => range.max ?? range.min)),
     currency: "USD",
-  };
-}
-
-function isGreenhouseResponse(value: unknown): value is GreenhouseResponse {
-  return isRecord(value) && Array.isArray(value.jobs);
-}
-
-function isAshbyResponse(value: unknown): value is AshbyResponse {
-  return isRecord(value) && Array.isArray(value.jobs);
-}
-
-export async function fetchCompanyFeeds(): Promise<{ listings: JobListing[]; statuses: FeedStatus[] }> {
-  const responses = await Promise.all(supportedCompanyFeeds.map(async (source) => {
-    try {
-      const endpoint = source.provider === "greenhouse"
-        ? `https://boards-api.greenhouse.io/v1/boards/${source.board}/jobs`
-        : `https://api.ashbyhq.com/posting-api/job-board/${source.board}?includeCompensation=true`;
-      const response = await fetch(endpoint, { headers: { Accept: "application/json" } });
-      if (!response.ok) throw new Error(`Feed returned HTTP ${response.status}.`);
-      const payload: unknown = await response.json();
-
-      if (source.provider === "greenhouse") {
-        if (!isGreenhouseResponse(payload)) throw new Error("Feed response had an unexpected format.");
-        const jobs = payload.jobs.map((job) => mapGreenhouseJob(job, source.board, source.company));
-        return { listings: jobs, status: { company: source.company, status: "loaded" as const, count: jobs.length } };
-      }
-
-      if (!isAshbyResponse(payload)) throw new Error("Feed response had an unexpected format.");
-      const jobs = payload.jobs.map((job) => mapAshbyJob(job, source.board, source.company));
-      return { listings: jobs, status: { company: source.company, status: "loaded" as const, count: jobs.length } };
-    } catch (error) {
-      return {
-        listings: [],
-        status: {
-          company: source.company,
-          status: "failed" as const,
-          count: 0,
-          error: error instanceof Error ? error.message : "The feed could not be loaded.",
-        },
-      };
-    }
-  }));
-  return {
-    listings: responses.flatMap((response) => response.listings),
-    statuses: responses.map((response) => response.status),
   };
 }
 

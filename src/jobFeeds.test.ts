@@ -9,7 +9,6 @@ import {
   salaryFromPayInputRanges,
   salaryUndisclosed,
   sortJobListings,
-  fetchCompanyFeeds,
   matchesJobSearch,
   type JobListing,
   type JobSearchFilters,
@@ -96,35 +95,6 @@ describe("authorized job feed filters", () => {
     expect(salaryFromAshbyCompensation({
       compensationTiers: [{ components: [{ compensationType: "Salary", interval: "1 HOUR", currencyCode: "USD", minValue: 100, maxValue: 150 }] }],
     })).toBeNull();
-  });
-
-  it("maps Ashby listings to their configured company and board", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input) => {
-      const url = String(input);
-      const board = url.split("job-board/")[1]?.split("?")[0] ?? "";
-      return new Response(JSON.stringify(url.includes("greenhouse.io")
-        ? { jobs: [] }
-        : { jobs: [{
-          id: board,
-          title: "Software Engineer",
-          location: "Remote: United States",
-          jobUrl: `https://jobs.ashbyhq.com/${board}/${board}`,
-        }] }), { status: 200 });
-    };
-
-    try {
-      const { listings } = await fetchCompanyFeeds();
-      const linear = listings.find((job) => job.company === "Linear");
-      expect(linear).toMatchObject({
-        source: "Linear",
-        company: "Linear",
-        provider: "ashby",
-        board: "linear",
-      });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 
   it("requires the published minimum to meet the $140,000 floor", () => {
