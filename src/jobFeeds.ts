@@ -28,6 +28,9 @@ export interface FeedStatus {
   status: "loaded" | "failed";
   count: number;
   error?: string;
+  boardKey?: string;
+  boardUrl?: string;
+  httpStatus?: number;
 }
 
 export interface JobSearchFilters {

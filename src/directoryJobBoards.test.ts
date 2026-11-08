@@ -111,6 +111,7 @@ describe("job board directory", () => {
     const incoming = [
       listing("greenhouse", "selected", "https://jobs.test/selected"),
       listing("lever", "new", "https://jobs.test/new"),
+      listing("ashby", "removed", "https://jobs.test/unselected-incoming"),
     ];
 
     expect(mergeSelectedDirectoryListings(current, incoming, [
@@ -203,19 +204,37 @@ describe("job board directory", () => {
     });
   });
 
-  it("rejects directory batches above the 100-board limit", async () => {
+  it("fetches up to 1000 boards and reports each board as it completes", async () => {
     const fetch = vi.fn(async () => Response.json({ jobs: [] }));
     vi.stubGlobal("fetch", fetch);
-    const hundredBoards = Array.from({ length: 100 }, (_, index) =>
+    const thousandBoards = Array.from({ length: 1000 }, (_, index) =>
       board("greenhouse", `company-${index}`, `board-${index}`),
     );
-    const result = await fetchSelectedDirectoryBoards(hundredBoards);
+    const onBoardComplete = vi.fn();
+    const result = await fetchSelectedDirectoryBoards(thousandBoards, onBoardComplete);
     expect(result.listings).toEqual([]);
-    expect(result.statuses).toHaveLength(100);
+    expect(result.statuses).toHaveLength(1000);
     expect(result.statuses.every((status) => status.status === "loaded")).toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(100);
-    await expect(fetchSelectedDirectoryBoards(Array.from({ length: 101 }, (_, index) =>
+    expect(fetch).toHaveBeenCalledTimes(1000);
+    expect(onBoardComplete).toHaveBeenCalledTimes(1000);
+    await expect(fetchSelectedDirectoryBoards(Array.from({ length: 1001 }, (_, index) =>
       board("greenhouse", `company-${index}`, `board-${index}`),
-    ))).rejects.toThrow("no more than 100");
+    ))).rejects.toThrow("no more than 1000");
+  });
+
+  it("reports 404 status and official board details for a failed directory entry", async () => {
+    const invalidBoard = board("greenhouse", "Renamed Company", "old-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Not found", { status: 404 })));
+
+    const result = await fetchSelectedDirectoryBoards([invalidBoard]);
+
+    expect(result.statuses[0]).toMatchObject({
+      company: "Renamed Company",
+      status: "failed",
+      error: "Board returned HTTP 404.",
+      boardKey: "greenhouse:old-token",
+      boardUrl: invalidBoard.board_url,
+      httpStatus: 404,
+    });
   });
 });

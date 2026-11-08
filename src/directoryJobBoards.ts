@@ -23,6 +23,8 @@ export interface DirectoryBoard {
   region: string;
 }
 
+export const MAX_DIRECTORY_BATCH_SIZE = 1000;
+
 export const jobKeywordPresets = [
   { keyword: "Software", id: "software" },
   { keyword: "Software Engineer", id: "software-engineer" },
@@ -233,7 +235,10 @@ export function mergeSelectedDirectoryListings(
       !isSearchableDirectoryListing(listing) ||
       selected.has(`${listing.provider}:${listing.board}`),
     ),
-    ...incoming,
+    ...incoming.filter((listing) =>
+      !isSearchableDirectoryListing(listing) ||
+      selected.has(`${listing.provider}:${listing.board}`),
+    ),
   ];
   const byUrl = new Map<string, JobListing>();
   for (const listing of merged) byUrl.set(listing.url.toLowerCase(), listing);
@@ -430,7 +435,7 @@ async function fetchBoard(board: DirectoryBoard): Promise<JobListing[]> {
   const response = await fetch(url, {
     headers: { Accept: board.platform === "personio" ? "application/xml, text/xml" : "application/json" },
   });
-  if (!response.ok) throw new Error(`Board returned HTTP ${response.status}.`);
+  if (!response.ok) throw new BoardFetchError(response.status);
   switch (board.platform) {
     case "greenhouse": return mapGreenhouse(board, await response.json());
     case "ashby": return mapAshby(board, await response.json());
@@ -442,33 +447,58 @@ async function fetchBoard(board: DirectoryBoard): Promise<JobListing[]> {
   }
 }
 
+class BoardFetchError extends Error {
+  constructor(readonly httpStatus: number) {
+    super(`Board returned HTTP ${httpStatus}.`);
+    this.name = "BoardFetchError";
+  }
+}
+
 export async function fetchSelectedDirectoryBoards(
   boards: DirectoryBoard[],
+  onBoardComplete?: (result: {
+    board: DirectoryBoard;
+    listings: JobListing[];
+    status: FeedStatus;
+  }) => void,
 ): Promise<{ listings: JobListing[]; statuses: FeedStatus[] }> {
-  if (boards.length > 100) throw new Error("Fetch no more than 100 directory boards in one batch.");
+  if (boards.length > MAX_DIRECTORY_BATCH_SIZE) {
+    throw new Error(`Fetch no more than ${MAX_DIRECTORY_BATCH_SIZE} directory boards in one batch.`);
+  }
   const results: Array<{ listings: JobListing[]; status: FeedStatus }> = new Array(boards.length);
   let nextIndex = 0;
   const workers = Array.from({ length: Math.min(4, boards.length) }, async () => {
     while (nextIndex < boards.length) {
       const index = nextIndex++;
       const board = boards[index];
+      let result: { listings: JobListing[]; status: FeedStatus };
       try {
         const listings = await fetchBoard(board);
-        results[index] = {
+        result = {
           listings,
           status: { company: displayCompany(board.company), status: "loaded", count: listings.length },
         };
       } catch (error) {
-        results[index] = {
+        const httpStatus = error instanceof BoardFetchError ? error.httpStatus : undefined;
+        result = {
           listings: [],
           status: {
             company: displayCompany(board.company),
             status: "failed",
             count: 0,
             error: error instanceof Error ? error.message : "The board could not be loaded.",
+            boardKey: `${board.platform}:${board.token}`,
+            boardUrl: board.board_url,
+            ...(httpStatus ? { httpStatus } : {}),
           },
         };
       }
+      if (result.status.status === "loaded") {
+        result.status.boardKey = `${board.platform}:${board.token}`;
+        result.status.boardUrl = board.board_url;
+      }
+      results[index] = result;
+      onBoardComplete?.({ board, ...result });
     }
   });
   await Promise.all(workers);

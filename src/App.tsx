@@ -11,6 +11,7 @@ import {
   mergeSelectedDirectoryListings,
   isSearchableDirectoryListing,
   jobKeywordPresets,
+  MAX_DIRECTORY_BATCH_SIZE,
   type JobKeywordPresetId,
   loadJobBoardDirectory,
   loadWorkdayJobBoardDirectory,
@@ -46,6 +47,7 @@ import {
 type View = "overview" | "discover" | "jobs" | "profile";
 const statuses: ApplicationStatus[] = ["Saved", "Preparing", "Applied", "Interviewing", "Offer", "Closed"];
 const FEED_RESULTS_PAGE_SIZE = 20;
+const DIRECTORY_BATCH_COOLDOWN_SECONDS = 2;
 
 function directoryBoardKey(board: DirectoryBoard): string {
   return `${board.platform}:${board.token}`;
@@ -141,6 +143,8 @@ function App() {
   const [processedDirectoryKeys, setProcessedDirectoryKeys] = useState<string[]>([]);
   const [directoryStatuses, setDirectoryStatuses] = useState<FeedStatus[]>([]);
   const [batchCooldown, setBatchCooldown] = useState(0);
+  const selectedDirectoryKeysRef = useRef(selectedDirectoryKeys);
+  selectedDirectoryKeysRef.current = selectedDirectoryKeys;
   const directoryLoadStarted = useRef(false);
   const workdayDirectoryLoadStarted = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -197,8 +201,6 @@ function App() {
     const selectedKeys = savedDefault?.companyBoardKeys ?? defaults.map(directoryBoardKey);
     setSelectedDirectoryKeys(selectedKeys);
     setFeedListings((current) => mergeSelectedDirectoryListings(current, [], selectedKeys));
-    setProcessedDirectoryKeys([]);
-    setDirectoryStatuses([]);
   }, [data.searchDefaults, directoryBoards, ready, keywordPreset]);
 
   useEffect(() => {
@@ -464,7 +466,7 @@ function App() {
       selectedDirectoryKeys.includes(directoryBoardKey(board)) &&
       !processedDirectoryKeys.includes(directoryBoardKey(board)),
     );
-    const directoryBatch = pendingBoards.slice(0, 100);
+    const directoryBatch = pendingBoards.slice(0, MAX_DIRECTORY_BATCH_SIZE);
     try {
       const [
         { listings: publicBoardListings, statuses: publicBoardStatuses },
@@ -480,7 +482,7 @@ function App() {
           ...current,
           ...directoryBatch.map(directoryBoardKey),
         ]);
-        setBatchCooldown(10);
+        setBatchCooldown(DIRECTORY_BATCH_COOLDOWN_SECONDS);
       }
       setFeedListings((current) =>
         mergeSelectedDirectoryListings(current, [...publicBoardListings, ...directoryListings], selectedDirectoryKeys),
@@ -489,8 +491,9 @@ function App() {
       const failed = statuses.length - loaded;
       const loadedDirectory = directoryBatchStatuses.filter((status) => status.status === "loaded").length;
       const failedDirectory = directoryBatchStatuses.length - loadedDirectory;
+      const matchingDirectoryListings = directoryListings.filter((listing) => matchesJobSearch(listing, searchFilters)).length;
       setMessage(
-        `Refreshed ${loaded} of ${statuses.length} public job feeds and loaded ${loadedDirectory} of ${directoryBatch.length} selected company boards.` +
+        `Refreshed ${loaded} of ${statuses.length} public job feeds and loaded ${loadedDirectory} of ${directoryBatch.length} selected company boards (${directoryListings.length} postings; ${matchingDirectoryListings} match current filters).` +
         (failed || failedDirectory ? " Some sources failed; review the available listings and batch results." : "") +
         (pendingBoards.length > directoryBatch.length ? " Start the next directory batch manually after the pause." : ""),
       );
@@ -506,6 +509,7 @@ function App() {
     const nextSelection = selectedDirectoryKeys.includes(key)
       ? selectedDirectoryKeys.filter((value) => value !== key)
       : [...selectedDirectoryKeys, key];
+    selectedDirectoryKeysRef.current = nextSelection;
     setProcessedDirectoryKeys((current) => current.filter((value) => value !== key));
     setSelectedDirectoryKeys(nextSelection);
     setFeedListings((current) => current.filter((listing) =>
@@ -515,13 +519,26 @@ function App() {
     persistActiveSearchDefault({ companyBoardKeys: nextSelection });
   }
 
+  function removeFailedDirectoryBoard(status: FeedStatus) {
+    if (!status.boardKey || !selectedDirectoryKeys.includes(status.boardKey)) return;
+    const nextSelection = selectedDirectoryKeys.filter((key) => key !== status.boardKey);
+    selectedDirectoryKeysRef.current = nextSelection;
+    setSelectedDirectoryKeys(nextSelection);
+    setProcessedDirectoryKeys((current) => current.filter((key) => key !== status.boardKey));
+    setFeedListings((current) => current.filter((listing) =>
+      `${listing.provider}:${listing.board}` !== status.boardKey,
+    ));
+    persistActiveSearchDefault({ companyBoardKeys: nextSelection });
+    setMessage(`${status.company} was removed from the selected boards on this device. Check its official board link for a renamed or mistyped directory entry.`);
+  }
+
   function selectAllDirectoryMatches() {
     const keys = directoryMatches.map(directoryBoardKey);
     setSelectedDirectoryKeys(keys);
     setProcessedDirectoryKeys([]);
     setDirectoryStatuses([]);
     persistActiveSearchDefault({ companyBoardKeys: keys });
-    setMessage(`Selected all ${directoryMatches.length.toLocaleString()} matching directory boards. Fetch results manually in batches of up to 100.`);
+    setMessage(`Selected all ${directoryMatches.length.toLocaleString()} matching directory boards. Fetch results manually in batches of up to ${MAX_DIRECTORY_BATCH_SIZE.toLocaleString()}.`);
   }
 
   function clearDirectorySelection() {
@@ -542,21 +559,47 @@ function App() {
       return;
     }
     const skippedBoards = selected.filter((board) => board.platform === "workday");
-    const batch = selected.filter((board) => board.platform !== "workday").slice(0, 100);
+    const batch = selected.filter((board) => board.platform !== "workday").slice(0, MAX_DIRECTORY_BATCH_SIZE);
     if (!batch.length) {
       setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map((board) => `${board.platform}:${board.token}`)]);
       setMessage("The remaining selected entries use Workday, which cannot be fetched directly from the browser. Open their board links from the directory.");
       return;
     }
     setLoadingFeeds(true);
-    setMessage("");
+    setMessage(`Fetching up to ${batch.length.toLocaleString()} directory boards; matching jobs will appear as results arrive.`);
     try {
-      const { listings, statuses } = await fetchSelectedDirectoryBoards(batch);
-      setDirectoryStatuses((current) => [...current, ...statuses]);
-      setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map((board) => `${board.platform}:${board.token}`), ...batch.map((board) => `${board.platform}:${board.token}`)]);
-      setFeedListings((current) => mergeSelectedDirectoryListings(current, listings, selectedDirectoryKeys));
-      setBatchCooldown(10);
-      setMessage(`Fetched a batch of ${batch.length} directory boards (${statuses.filter((status) => status.status === "loaded").length} succeeded). Skipped ${skippedBoards.length} Workday boards. ${Math.max(0, selected.length - batch.length - skippedBoards.length)} fetchable boards remain; start the next batch manually after the pause.`);
+      let completedCount = 0;
+      let receivedListingCount = 0;
+      let matchingListingCount = 0;
+      let pendingListings: JobListing[] = [];
+      let pendingStatuses: FeedStatus[] = [];
+      let pendingBoardKeys: string[] = [];
+      const { listings, statuses } = await fetchSelectedDirectoryBoards(batch, ({ board, listings: boardListings, status }) => {
+        completedCount += 1;
+        receivedListingCount += boardListings.length;
+        matchingListingCount += boardListings.filter((listing) => matchesJobSearch(listing, searchFilters)).length;
+        pendingListings = [...pendingListings, ...boardListings];
+        pendingStatuses = [...pendingStatuses, status];
+        pendingBoardKeys.push(directoryBoardKey(board));
+        if (completedCount % 20 !== 0 && completedCount !== batch.length) return;
+
+        const selectedListings = pendingListings;
+        const completedStatuses = pendingStatuses;
+        const completedKeys = pendingBoardKeys;
+        pendingListings = [];
+        pendingStatuses = [];
+        pendingBoardKeys = [];
+        setDirectoryStatuses((current) => [...current, ...completedStatuses]);
+        setProcessedDirectoryKeys((current) => [...current, ...completedKeys]);
+        setFeedListings((current) =>
+          mergeSelectedDirectoryListings(current, selectedListings, selectedDirectoryKeysRef.current),
+        );
+        setMessage(`Fetching directory boards: ${completedCount.toLocaleString()} of ${batch.length.toLocaleString()} complete; ${receivedListingCount.toLocaleString()} postings received, ${matchingListingCount.toLocaleString()} match the current filters.`);
+      });
+      setProcessedDirectoryKeys((current) => [...current, ...skippedBoards.map(directoryBoardKey)]);
+      setBatchCooldown(DIRECTORY_BATCH_COOLDOWN_SECONDS);
+      const matchingListings = listings.filter((listing) => matchesJobSearch(listing, searchFilters)).length;
+      setMessage(`Fetched a batch of ${batch.length} directory boards (${statuses.filter((status) => status.status === "loaded").length} succeeded; ${listings.length} postings, ${matchingListings} match current filters). Skipped ${skippedBoards.length} Workday boards. ${Math.max(0, selected.length - batch.length - skippedBoards.length)} fetchable boards remain; start the next batch manually after the pause.`);
     } catch (error) {
       setMessage(error instanceof Error ? `Directory batch failed: ${error.message}` : "Directory batch failed unexpectedly.");
     } finally {
@@ -758,7 +801,6 @@ function App() {
         {view === "overview" && (
           <section className="page">
             <div className="welcome-row">
-              <div><div className="eyebrow">YOUR JOB SEARCH, GROUNDED</div><h1>A little more <em>clarity.</em></h1><p className="page-subtitle">A private space to find your fit and keep your next move in view.</p></div>
               <div className="welcome-actions"><button className="button button-outline" onClick={() => setShowAlertForm(true)}>Import alert text</button><button className="button button-dark" onClick={() => { setEditingJobId(null); setShowJobForm(true); }}>＋ Add a job</button></div>
             </div>
             <div className="metric-grid">
@@ -766,7 +808,6 @@ function App() {
               <Metric label="In conversation" value={counts.interviewing} note="Interviewing right now" icon="◌" />
               <Metric label="Offers received" value={counts.offers} note="Good things happen" icon="✳" />
             </div>
-            <div className="section-heading"><div><h2>Recent opportunities</h2><p>Your applications, all in one calm place.</p></div><button className="text-button" onClick={() => setView("jobs")}>View all <span>→</span></button></div>
             {sortedJobs.length ? <div className="job-list">{sortedJobs.slice(0, 4).map((job) => <JobRow key={job.id} job={job} profile={data.profile} onOpen={() => { setSelectedId(job.id); setView("jobs"); }} />)}</div> : <EmptyState onAdd={() => setShowJobForm(true)} />}
             {!data.profileReady && <div className="onboarding-banner"><div className="onboarding-icon">✳</div><div><strong>Start with your experience</strong><p>Import your resume or add a few details to get more relevant match insights.</p></div><button className="button button-outline" onClick={() => setView("profile")}>Set up profile <span>→</span></button></div>}
             <div className="footer-note"><span>✦</span> Applications are always reviewed and submitted by you.</div>
@@ -798,7 +839,6 @@ function App() {
         {view === "discover" && (
           <section className="page">
             <div className="welcome-row">
-              <div><div className="eyebrow">PUBLIC JOB FEEDS</div><h1>Find your <em>next role.</em></h1><p className="page-subtitle">Search public employer and job-board listings, then tune the results to your preferences.</p></div>
               <button className="button button-dark" onClick={searchCompanyFeeds} disabled={loadingFeeds || directoryLoading || batchCooldown > 0}>
                 {loadingFeeds ? "Loading feeds and companies…" : directoryLoading ? "Loading company directory…" : batchCooldown > 0 ? `Next company batch in ${batchCooldown}s` : "Refresh feeds + next company batch"} <span>↻</span>
               </button>
@@ -882,7 +922,7 @@ function App() {
                   <div className="directory-heading directory-tab-heading">
                     <div><h2>Choose employers to search</h2><p>{directoryBoards.length ? `${directoryBoards.length.toLocaleString()} searchable public boards; 30 companies are selected by default. Choose a keyword preset for a tailored default list, or add and remove companies below.` : directoryError || "Loading the searchable employer directory…"}</p></div>
                     <button className="button button-outline" onClick={fetchNextDirectoryBatch} disabled={loadingFeeds || batchCooldown > 0 || pendingDirectoryBoardCount === 0}>
-                      {loadingFeeds ? "Fetching batch…" : batchCooldown > 0 ? `Next batch in ${batchCooldown}s` : `Fetch next batch (${Math.min(100, pendingDirectoryBoardCount)} max)`}
+                      {loadingFeeds ? "Fetching batch…" : batchCooldown > 0 ? `Next batch in ${batchCooldown}s` : `Fetch next batch (${Math.min(MAX_DIRECTORY_BATCH_SIZE, pendingDirectoryBoardCount).toLocaleString()} max)`}
                     </button>
                   </div>
                   <details className="directory-dropdown">
@@ -906,7 +946,7 @@ function App() {
                   {directoryError && <p className="directory-error" role="alert">{directoryError} <button className="text-button" onClick={retryDirectoryLoad}>Retry</button></p>}
                   {!directoryQuery.trim() && directoryBoards.length === 0 ? <p className="directory-help">Loading the employer directory…</p> : directoryMatches.length ? (
                     <>
-                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. “Select all” applies to every match, including entries not currently visible. Refresh fetches the next selected batch of up to 100 boards; further batches are manual with a pause between them.</p>
+                      <p className="directory-help">{directoryMatches.length.toLocaleString()} matching boards, sorted by listed open roles. “Select all” applies to every match, including entries not currently visible. Fetch next batch requests up to {MAX_DIRECTORY_BATCH_SIZE.toLocaleString()} selected boards; matching jobs are added as results arrive.</p>
                       <div className="directory-selection-actions">
                         <button className="text-button" onClick={selectAllDirectoryMatches}>Select all {directoryMatches.length.toLocaleString()} matches</button>
                         <button className="text-button" onClick={clearDirectorySelection} disabled={selectedDirectoryKeys.length === 0}>Clear selection</button>
@@ -976,7 +1016,19 @@ function App() {
                       <ul className="directory-status-list errors" aria-label="Directory boards with errors">
                         {failedDirectoryStatuses.map((status, index) => (
                           <li key={`${status.company}:${index}`}>
-                            <strong>{status.company}</strong><span>{status.error}</span>
+                            <strong>{status.company}</strong>
+                            <span>
+                              {status.error}
+                              {status.httpStatus === 404 && <> The endpoint may be outdated or the board token may be mistyped; verify it on the official board.</>}
+                              <span className="directory-status-actions">
+                                {status.boardUrl && <a href={status.boardUrl} target="_blank" rel="noreferrer">Check official board ↗</a>}
+                                {status.httpStatus === 404 && status.boardKey && (
+                                  <button className="text-button" onClick={() => removeFailedDirectoryBoard(status)} disabled={!selectedDirectoryKeys.includes(status.boardKey)}>
+                                    {selectedDirectoryKeys.includes(status.boardKey) ? "Remove from selection" : "Removed"}
+                                  </button>
+                                )}
+                              </span>
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -985,32 +1037,40 @@ function App() {
                 </details>
               )}
             </div>
-            <div className="section-heading feed-results-heading">
-              <div><h2>Jobs matching your filters</h2><p>{salaryQualifiedListings.length} jobs with disclosed USD salary in the selected range.</p></div>
-              <label>Sort by
-                <select value={jobListingSort} onChange={(event) => setJobListingSort(event.target.value as JobListingSort)}>
-                  <option value="relevance">Best match</option>
-                  <option value="newest">Newest</option>
-                  <option value="salary-high">Salary: high to low</option>
-                  <option value="salary-low">Salary: low to high</option>
-                  <option value="company">Company: A to Z</option>
-                </select>
-              </label>
-            </div>
-            {salaryQualifiedListings.length ? (
-              <>
-              <div className="feed-job-list">{visibleSalaryQualifiedListings.map((listing) => (
-                <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
-                  onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />
-              ))}</div>
-              <JobListingPagination
-                currentPage={salaryQualifiedPage}
-                itemCount={salaryQualifiedListings.length}
-                pageSize={FEED_RESULTS_PAGE_SIZE}
-                onPageChange={setSalaryQualifiedPage}
-              />
-              </>
-            ) : <div className="empty-state"><h3>{feedListings.length ? "No jobs match these filters." : "Refresh public job feeds to search."}</h3><p>Try broadening your keywords, location, role, or salary range. Some feeds may not disclose compensation.</p></div>}
+            <details className="salary-unknown-section matching-jobs-section">
+              <summary>
+                <span>
+                  <strong>Jobs matching your filters</strong>
+                  <small>{salaryQualifiedListings.length} jobs with disclosed USD salary · {salaryUnknownListings.length} jobs without salary details</small>
+                </span>
+              </summary>
+              <div className="section-heading feed-results-heading">
+                <div><h2>Jobs with disclosed salary</h2><p>{salaryQualifiedListings.length} jobs in the selected salary range.</p></div>
+                <label>Sort by
+                  <select value={jobListingSort} onChange={(event) => setJobListingSort(event.target.value as JobListingSort)}>
+                    <option value="relevance">Best match</option>
+                    <option value="newest">Newest</option>
+                    <option value="salary-high">Salary: high to low</option>
+                    <option value="salary-low">Salary: low to high</option>
+                    <option value="company">Company: A to Z</option>
+                  </select>
+                </label>
+              </div>
+              {salaryQualifiedListings.length ? (
+                <>
+                <div className="feed-job-list">{visibleSalaryQualifiedListings.map((listing) => (
+                  <FeedJobCard key={`${listing.source}:${listing.id}`} listing={listing} loading={loadingListingId === listing.id}
+                    onLoadDetails={() => showListingDetails(listing)} onSave={() => saveFeedListing(listing)} />
+                ))}</div>
+                <JobListingPagination
+                  currentPage={salaryQualifiedPage}
+                  itemCount={salaryQualifiedListings.length}
+                  pageSize={FEED_RESULTS_PAGE_SIZE}
+                  onPageChange={setSalaryQualifiedPage}
+                />
+                </>
+              ) : <div className="empty-state"><h3>{feedListings.length ? "No jobs match these filters." : "Refresh public job feeds to search."}</h3><p>Try broadening your keywords, location, role, or salary range. Some feeds may not disclose compensation.</p></div>}
+            </details>
             {searchFilters.includeUndisclosedSalary && (
               <details className="salary-unknown-section">
                 <summary><span><strong>Salary not yet verified</strong><small>{salaryUnknownListings.length} jobs matching the other filters without a salary range in the feed.</small></span></summary>
