@@ -32,6 +32,12 @@ import {
   type JobSearchFilters,
 } from "./jobFeeds";
 import { getMatch } from "./matching";
+import {
+  clearProjectApplications,
+  loadProjectApplications,
+  mergeApplicationJobs,
+  saveProjectApplications,
+} from "./projectApplications";
 import { deleteAllData, loadData, saveData } from "./storage";
 import {
   defaultData,
@@ -109,6 +115,7 @@ function parseResumeText(text: string): Profile {
 function App() {
   const [data, setData] = useState<LocalData>(defaultData);
   const [ready, setReady] = useState(false);
+  const [projectApplicationsReady, setProjectApplicationsReady] = useState(false);
   const [view, setView] = useState<View>("overview");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showJobForm, setShowJobForm] = useState(false);
@@ -151,10 +158,26 @@ function App() {
   const extractedJobsInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    loadData()
-      .then(setData)
-      .catch(() => setMessage("Browser storage could not be opened. Check your browser’s local storage settings."))
-      .finally(() => setReady(true));
+    async function initialize() {
+      try {
+        const localData = await loadData();
+        try {
+          const projectJobs = await loadProjectApplications();
+          setData({ ...localData, jobs: mergeApplicationJobs(projectJobs, localData.jobs) });
+          setProjectApplicationsReady(true);
+        } catch (error) {
+          setData(localData);
+          setMessage(error instanceof Error
+            ? `Project applications could not be loaded: ${error.message}`
+            : "Project applications could not be loaded.");
+        }
+      } catch {
+        setMessage("Browser storage could not be opened. Check your browser’s local storage settings.");
+      } finally {
+        setReady(true);
+      }
+    }
+    void initialize();
   }, []);
 
   useEffect(() => {
@@ -164,6 +187,19 @@ function App() {
     }, 180);
     return () => window.clearTimeout(timer);
   }, [data, ready]);
+
+  useEffect(() => {
+    if (!ready || !projectApplicationsReady) return;
+    const timer = window.setTimeout(() => {
+      const save = data.jobs.length ? saveProjectApplications(data.jobs) : clearProjectApplications();
+      save.catch((error: unknown) => setMessage(
+        error instanceof Error
+          ? `Could not save applications to the project folder: ${error.message}`
+          : "Could not save applications to the project folder.",
+      ));
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [data.jobs, projectApplicationsReady, ready]);
 
   useEffect(() => {
     setSalaryQualifiedPage(1);
@@ -758,10 +794,31 @@ function App() {
 
   async function removeAll() {
     if (!window.confirm("Delete your saved profile, all jobs, tracking notes, and drafts from this browser? This cannot be undone.")) return;
-    await deleteAllData();
-    setData(defaultData);
-    setSelectedId(null);
-    setMessage("All Fieldnote data was deleted from this browser.");
+    try {
+      if (projectApplicationsReady) await clearProjectApplications();
+      await deleteAllData();
+      setData(defaultData);
+      setSelectedId(null);
+      setMessage(projectApplicationsReady
+        ? "All Fieldnote data was deleted from this browser and the project folder."
+        : "All Fieldnote data was deleted from this browser. The project applications folder was unavailable.");
+    } catch (error) {
+      setMessage(error instanceof Error ? `Could not delete all local data: ${error.message}` : "Could not delete all local data.");
+    }
+  }
+
+  async function clearApplications() {
+    if (!window.confirm("Clear all applications, notes, statuses, and drafts? This cannot be undone.")) return;
+    try {
+      if (projectApplicationsReady) await clearProjectApplications();
+      setData((current) => ({ ...current, jobs: [] }));
+      setSelectedId(null);
+      setMessage(projectApplicationsReady
+        ? "All applications were cleared from the browser and project folder."
+        : "Applications were cleared from this browser. The project applications folder was unavailable.");
+    } catch (error) {
+      setMessage(error instanceof Error ? `Could not clear applications: ${error.message}` : "Could not clear applications.");
+    }
   }
 
   return (
@@ -1097,7 +1154,17 @@ function App() {
 
         {view === "jobs" && (
           <section className="page">
-            <div className="welcome-row"><div><div className="eyebrow">YOUR PIPELINE</div><h1>Applications, <em>in focus.</em></h1><p className="page-subtitle">Import selected extracted jobs or job-alert text, then review and apply yourself.</p></div><div className="welcome-actions"><input ref={extractedJobsInput} className="hidden-input" type="file" accept=".json,application/json" onChange={(event) => importExtractedJobs(event.target.files?.[0])} /><button className="button button-outline" onClick={() => extractedJobsInput.current?.click()}>Import selected jobs JSON</button><button className="button button-outline" onClick={() => setShowAlertForm(true)}>Import alert text</button><button className="button button-dark" onClick={() => { setEditingJobId(null); setShowJobForm(true); }}>＋ Add a job</button></div></div>
+            <div className="welcome-row">
+              <div><div className="eyebrow">YOUR PIPELINE</div><h1>Applications, <em>in focus.</em></h1><p className="page-subtitle">Tracked opportunities are saved in this browser and the local project folder.</p></div>
+              <div className="welcome-actions">
+                <input ref={extractedJobsInput} className="hidden-input" type="file" accept=".json,application/json" onChange={(event) => importExtractedJobs(event.target.files?.[0])} />
+                <button className="button button-outline" onClick={() => extractedJobsInput.current?.click()}>Import selected jobs JSON</button>
+                <button className="button button-outline" onClick={() => setShowAlertForm(true)}>Import alert text</button>
+                <button className="button button-outline" onClick={() => exportJobs(data.jobs)} disabled={!data.jobs.length}>Export CSV</button>
+                <button className="button button-danger" onClick={clearApplications} disabled={!data.jobs.length}>Clear applications</button>
+                <button className="button button-dark" onClick={() => { setEditingJobId(null); setShowJobForm(true); }}>＋ Add a job</button>
+              </div>
+            </div>
             {selectedJob ? (
               <JobDetail
                 key={selectedJob.id}
@@ -1115,7 +1182,7 @@ function App() {
               />
             ) : sortedJobs.length ? (
               <>
-                <div className="list-toolbar"><span>{sortedJobs.length} {sortedJobs.length === 1 ? "opportunity" : "opportunities"}</span><button className="text-button" onClick={() => exportJobs(data.jobs)}>Export CSV ↓</button></div>
+                <div className="list-toolbar"><span>{sortedJobs.length} {sortedJobs.length === 1 ? "opportunity" : "opportunities"}</span></div>
                 <div className="job-list full-list">{sortedJobs.map((job) => <JobRow key={job.id} job={job} profile={data.profile} onOpen={() => setSelectedId(job.id)} />)}</div>
               </>
             ) : <EmptyState onAdd={() => setShowJobForm(true)} />}

@@ -17,8 +17,6 @@ Find jobs searches public job feeds and selected companies in `jobBoardDirectory
 
 Select employers from the searchable directory, then fetch up to 1,000 selected boards per manual batch, with four requests at a time and a two-second pause between batches. Results appear as board requests complete and are filtered locally by the search settings. Public multi-board feeds include Remote OK, Remotive, Arbeitnow, Jobicy, and We Work Remotely. The app does not send your resume or profile to job feeds; you review and submit applications yourself.
 
-Searchable and Workday directories are supplied as JSON files in the project. The failed-board file is retained as a separate record of excluded entries; it is not loaded by the app.
-
 ### Optional form autofill
 
 You can also import your profile JSON into the extension. When explicitly invoked on LinkedIn or Indeed, it fills supported blank name, email, phone, and location fields. It does not overwrite existing values, answer screening questions, upload files, click Submit, or automate login. Review and submit each application yourself.
@@ -28,9 +26,9 @@ The extension requests storage and optional per-origin site access, not persiste
 ## Privacy and data
 
 - DOCX resume text is extracted in the browser; the resume file is not saved or uploaded.
-- The editable profile, saved applications, pasted alert/job descriptions, links, notes, statuses, drafts, and customized search defaults are stored in IndexedDB in this browser. They are not written into the project files, so another person using the project has their own local data in their browser.
+- The editable profile and customized search defaults are stored in IndexedDB in this browser. Saved applications, job descriptions, links, notes, statuses, and drafts are stored in browser IndexedDB and mirrored to `applications/applications.json` in the project when running with `npm run dev` or `npm run preview`. The `applications` folder is gitignored and remains local to your project.
 - Job links are references only and are opened only when you choose to click them.
-- Use the profile page to delete all app data. Individual opportunities can be removed from their detail view.
+- Use **Clear applications** in the Applications view to remove all tracked jobs from the browser and project folder. Use the profile page to delete all app data. Individual opportunities can be removed from their detail view.
 - CSV export contains job and application tracking fields.
 - The app has no user accounts, telemetry, backend, cloud sync, or external AI calls. Searching does make direct requests to the selected public employer job feeds; it does not transmit your resume/profile.
 - The extension reads approved public pages locally in your browser and exports selected job details as a JSON file for the app to import.
