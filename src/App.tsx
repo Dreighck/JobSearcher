@@ -1161,7 +1161,7 @@ function App() {
         {view === "jobs" && (
           <section className="page">
             <div className="welcome-row">
-              <div><div className="eyebrow">YOUR PIPELINE</div><h1>Applications, <em>in focus.</em></h1><p className="page-subtitle">Tracked opportunities are saved in this browser and the local project folder.</p></div>
+              <div><p className="page-subtitle">Tracked opportunities are saved in this browser and the local project folder.</p></div>
               <div className="welcome-actions">
                 <input ref={extractedJobsInput} className="hidden-input" type="file" accept=".json,application/json" onChange={(event) => importExtractedJobs(event.target.files?.[0])} />
                 <button className="button button-outline" onClick={() => extractedJobsInput.current?.click()}>Import selected jobs JSON</button>
