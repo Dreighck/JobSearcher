@@ -43,6 +43,12 @@ export interface JobSearchFilters {
   minimumSalary: number | null;
   maximumSalary: number | null;
   includeUndisclosedSalary: boolean;
+  maximumExperienceYears: number | null;
+}
+
+export interface ExperienceRequirement {
+  minimumYears: number;
+  maximumYears: number | null;
 }
 
 export type JobListingSort =
@@ -53,6 +59,37 @@ export type JobListingSort =
   | "company";
 
 export type JobPostedDateRange = JobSearchFilters["datePosted"];
+
+export function parseExperienceRequirement(text: string): ExperienceRequirement | null {
+  const experiencePattern = /\b(?:(?:at least|minimum(?: of)?|min\.?)\s*)?(\d+(?:\.\d+)?)\s*(?:[-–—]|to)\s*(\d+(?:\.\d+)?)\s*(?:\+|plus)?\s*years?\b(?:\s+(?:of\s+)?(?:(?:relevant|related|professional|work|industry)\s+)?experience|['’]\s*(?:(?:relevant|related|professional|work|industry)\s+)?experience)\b|\b(?:(?:at least|minimum(?: of)?|min\.?)\s*)?(\d+(?:\.\d+)?)\s*(\+|plus)?\s*years?\b(?:\s+(?:of\s+)?(?:(?:relevant|related|professional|work|industry)\s+)?experience|['’]\s*(?:(?:relevant|related|professional|work|industry)\s+)?experience)\b/gi;
+  const requirements: ExperienceRequirement[] = [];
+
+  for (const match of text.matchAll(experiencePattern)) {
+    if (match[1] !== undefined && match[2] !== undefined) {
+      requirements.push({ minimumYears: Number(match[1]), maximumYears: Number(match[2]) });
+    } else if (match[3] !== undefined) {
+      requirements.push({ minimumYears: Number(match[3]), maximumYears: null });
+    }
+  }
+
+  const reversedPattern = /\bexperience\b[^.;\n]{0,40}?\b(\d+(?:\.\d+)?)\s*(\+|plus)?\s*years?\b/gi;
+  for (const match of text.matchAll(reversedPattern)) {
+    requirements.push({ minimumYears: Number(match[1]), maximumYears: null });
+  }
+
+  if (!requirements.length) return null;
+  return requirements.reduce((greatest, current) =>
+    current.minimumYears > greatest.minimumYears ? current : greatest,
+  );
+}
+
+export function formatExperienceRequirement(requirement: ExperienceRequirement | null): string {
+  if (!requirement) return "Not specified";
+  if (requirement.maximumYears !== null) {
+    return `${requirement.minimumYears}–${requirement.maximumYears} years`;
+  }
+  return `${requirement.minimumYears}+ years`;
+}
 
 export function composeJobSearchKeyword(level: JobLevel, customLevel: string, keyword: string): string {
   const prefix = level === "custom" ? customLevel.trim() : level;
@@ -295,6 +332,11 @@ export function matchesJobSearch(job: JobListing, filters: JobSearchFilters, now
         ? 7 * 24 * 60 * 60 * 1000
         : 30 * 24 * 60 * 60 * 1000;
     if (postedAt < now - rangeMs || postedAt > now) return false;
+  }
+
+  if (filters.maximumExperienceYears !== null) {
+    const experience = parseExperienceRequirement(`${job.title}\n${job.description}`);
+    if (experience && experience.minimumYears > filters.maximumExperienceYears) return false;
   }
 
   if (!job.salary) return filters.includeUndisclosedSalary;

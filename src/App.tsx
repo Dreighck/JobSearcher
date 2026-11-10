@@ -22,8 +22,10 @@ import {
 } from "./directoryJobBoards";
 import {
   composeJobSearchKeyword,
+  formatExperienceRequirement,
   loadListingDetails,
   matchesJobSearch,
+  parseExperienceRequirement,
   salaryUndisclosed,
   sortJobListings,
   type FeedStatus,
@@ -73,6 +75,7 @@ const defaultSearchFilters: JobSearchFilters = {
   minimumSalary: 140000,
   maximumSalary: null,
   includeUndisclosedSalary: true,
+  maximumExperienceYears: null,
 };
 
 function makeId(): string {
@@ -383,6 +386,7 @@ function App() {
         minimumSalary: searchFilters.minimumSalary,
         maximumSalary: searchFilters.maximumSalary,
         includeUndisclosedSalary: searchFilters.includeUndisclosedSalary,
+        maximumExperienceYears: searchFilters.maximumExperienceYears,
       },
       sort: jobListingSort,
       companyBoardKeys: [...selectedDirectoryKeys],
@@ -936,9 +940,11 @@ function App() {
                 </label>
                 <label>Minimum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.minimumSalary ?? ""} placeholder="No minimum" onChange={(event) => updateSearchFilters({ minimumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
                 <label>Maximum annual salary (USD)<input type="number" min="0" step="5000" value={searchFilters.maximumSalary ?? ""} placeholder="No maximum" onChange={(event) => updateSearchFilters({ maximumSalary: event.target.value ? Number(event.target.value) : null })} /></label>
+                <label>Maximum required experience (years)<input type="number" min="0" step="1" value={searchFilters.maximumExperienceYears ?? ""} placeholder="Any requirement" onChange={(event) => updateSearchFilters({ maximumExperienceYears: event.target.value ? Number(event.target.value) : null })} /></label>
                 <label className="search-checkbox"><input type="checkbox" checked={searchFilters.includeUndisclosedSalary} onChange={(event) => updateSearchFilters({ includeUndisclosedSalary: event.target.checked })} /> Include jobs with undisclosed salary</label>
               </div>
               <p className="search-filter-note">Salary ranges must overlap your selected range. Only disclosed USD salaries can be compared; jobs without a salary are listed separately when included.</p>
+              <p className="search-filter-note">Experience requirements are parsed from posting text. A maximum filters out higher minimum requirements; jobs with unspecified experience remain included.</p>
             </div>
             <div className="saved-search-panel">
               <div className="saved-search-create">
@@ -1259,6 +1265,9 @@ function FeedJobCard({ listing, loading, onLoadDetails, onSave }: {
   onLoadDetails: () => void;
   onSave: () => void;
 }) {
+  const experience = formatExperienceRequirement(
+    parseExperienceRequirement(`${listing.title}\n${listing.description}`),
+  );
   const salary = listing.salary
     ? `$${listing.salary.min.toLocaleString()}${listing.salary.max ? `–$${listing.salary.max.toLocaleString()}` : "+"} ${listing.salary.currency}`
     : listing.description ? "Salary not disclosed in the public posting" : "Salary not checked yet";
@@ -1268,6 +1277,7 @@ function FeedJobCard({ listing, loading, onLoadDetails, onSave }: {
     <div className="feed-job-head"><div className="company-mark">{listing.company.slice(0, 1)}</div><div className="job-primary"><strong>{listing.title}</strong><span>{listing.company} <i>·</i> {listing.location || "Location not specified"}</span></div></div>
     <div className="feed-source">Source: {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">{listing.source}</a> : listing.source}</div>
     <div className={listing.salary ? "feed-salary" : "feed-salary unknown"}>{salary}</div>
+    <div className="feed-experience">Experience: {experience}</div>
     {listing.description && <p className="feed-description">{listing.description.slice(0, 220)}{listing.description.length > 220 ? "…" : ""}</p>}
     <div className="feed-job-actions">
       {officialUrl && <a className="button button-outline small-button" href={officialUrl} target="_blank" rel="noreferrer">Official listing ↗</a>}

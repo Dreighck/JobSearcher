@@ -15,7 +15,7 @@ Open the localhost URL printed by Vite. Run tests with `npm test` and create a p
 
 Find jobs searches public job feeds and selected companies in `jobBoardDirectory.json` (10,610 searchable boards). The 263 entries for 250 companies reported as HTTP 404 have been moved to `failedJobBoards.json` and are not included in searches. Workday entries are kept separately in `workdayJobBoardDirectory.json` (1,371 boards) and are browse-only because Workday blocks direct browser requests.
 
-Select employers from the searchable directory, then fetch up to 1,000 selected boards per manual batch, with four requests at a time and a two-second pause between batches. Results appear as board requests complete and are filtered locally by the search settings. Public multi-board feeds include Remote OK, Remotive, Arbeitnow, Jobicy, and We Work Remotely. The app does not send your resume or profile to job feeds; you review and submit applications yourself.
+Select employers from the searchable directory, then fetch up to 1,000 selected boards per manual batch, with four requests at a time and a two-second pause between batches. Results appear as board requests complete and are filtered locally by the search settings. Find Jobs parses years-of-experience requirements from posting text, displays detected requirements, and offers an optional maximum-years filter. Public multi-board feeds include Remote OK, Remotive, Arbeitnow, Jobicy, and We Work Remotely. The app does not send your resume or profile to job feeds; you review and submit applications yourself.
 
 ### Optional form autofill
 

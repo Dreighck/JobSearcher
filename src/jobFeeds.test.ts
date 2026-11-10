@@ -10,6 +10,8 @@ import {
   salaryUndisclosed,
   sortJobListings,
   matchesJobSearch,
+  formatExperienceRequirement,
+  parseExperienceRequirement,
   type JobListing,
   type JobSearchFilters,
 } from "./jobFeeds";
@@ -41,6 +43,7 @@ const defaultFilters: JobSearchFilters = {
   minimumSalary: 140000,
   maximumSalary: null,
   includeUndisclosedSalary: true,
+  maximumExperienceYears: null,
 
 };
 
@@ -69,6 +72,19 @@ describe("authorized job feed filters", () => {
     expect(composeJobSearchKeyword("custom", " Staff ", " Software Engineer ")).toBe("Staff Software Engineer");
     expect(composeJobSearchKeyword("", "", "Software Engineer")).toBe("Software Engineer");
     expect(composeJobSearchKeyword("Senior", "", "")).toBe("Senior");
+  });
+
+  it("parses common years-of-experience requirements", () => {
+    expect(parseExperienceRequirement("Requires 5+ years of relevant experience."))
+      .toEqual({ minimumYears: 5, maximumYears: null });
+    expect(parseExperienceRequirement("3-5 years of professional experience preferred."))
+      .toEqual({ minimumYears: 3, maximumYears: 5 });
+    expect(parseExperienceRequirement("Experience: 7 years in software engineering."))
+      .toEqual({ minimumYears: 7, maximumYears: null });
+    expect(parseExperienceRequirement("A degree and strong communication skills are required.")).toBeNull();
+    expect(formatExperienceRequirement(parseExperienceRequirement("2 to 4 years experience")))
+      .toBe("2–4 years");
+    expect(formatExperienceRequirement(null)).toBe("Not specified");
   });
 
   it("extracts a disclosed USD salary range from job text", () => {
@@ -142,6 +158,18 @@ describe("authorized job feed filters", () => {
       workArrangement: "onsite",
     })).toBe(true);
     expect(matchesJobSearch(job, { ...defaultFilters, minimumSalary: 195000 })).toBe(false);
+  });
+
+  it("filters by parsed minimum years of experience while retaining unspecified postings", () => {
+    const fiveYearsRequired = listing({ description: "Requires 5+ years of relevant experience." });
+    const threeToFiveYears = listing({ description: "3-5 years of experience preferred." });
+    const noExperienceRequirement = listing({ description: "Build reliable services with TypeScript." });
+    const filters = { ...defaultFilters, maximumExperienceYears: 3 };
+
+    expect(matchesJobSearch(fiveYearsRequired, filters)).toBe(false);
+    expect(matchesJobSearch(threeToFiveYears, filters)).toBe(true);
+    expect(matchesJobSearch(noExperienceRequirement, filters)).toBe(true);
+    expect(matchesJobSearch(listing({ title: "Engineer with 4+ years experience" }), filters)).toBe(false);
   });
 
   it("filters by rolling posting date ranges and omits unknown or future dates", () => {

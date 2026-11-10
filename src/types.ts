@@ -70,6 +70,7 @@ export interface SavedJobSearch {
     minimumSalary: number | null;
     maximumSalary: number | null;
     includeUndisclosedSalary: boolean;
+    maximumExperienceYears: number | null;
   };
   sort: "relevance" | "newest" | "salary-high" | "salary-low" | "company";
   companyBoardKeys: string[];

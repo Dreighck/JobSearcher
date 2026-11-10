@@ -341,6 +341,7 @@ h1 em { font: italic 400 1.05em var(--serif); color: #66836d; letter-spacing: -1
 .feed-source a:hover { text-decoration: underline; }
 .feed-salary { margin: 10px 0 0 40px; color: #588363; font-size: 10px; font-weight: 700; }
 .feed-salary.unknown { color: #9a8b6a; }
+.feed-experience { margin: 5px 0 0 40px; color: #78877e; font-size: 9px; }
 .feed-description { margin: 10px 0 0 40px; color: #87928a; font-size: 9px; line-height: 1.6; }
 .feed-job-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 0 40px; }
 .feed-job-actions .button { margin: 0; }
